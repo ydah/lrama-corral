@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <title>Lrama Corral</title>
+  <style>
+    :root {
+      --bg-primary: #f5f5f5;
+      --bg-secondary: #ffffff;
+      --bg-header: #2c3e50;
+      --text-primary: #2c3e50;
+      --text-secondary: #7f8c8d;
+      --text-inverse: #ffffff;
+      --border-color: #bdc3c7;
+      --shadow: rgba(0, 0, 0, 0.1);
+      --btn-primary: #3498db;
+      --btn-primary-hover: #2980b9;
+      --btn-secondary: #95a5a6;
+      --btn-secondary-hover: #7f8c8d;
+      --status-bg: #ecf0f1;
+      --status-text: #2c3e50;
+      --status-loading-bg: #fff3cd;
+      --status-loading-text: #856404;
+      --status-ready-bg: #d4edda;
+      --status-ready-text: #155724;
+      --status-error-bg: #f8d7da;
+      --status-error-text: #721c24;
+      --error-bg: #f8d7da;
+      --error-text: #721c24;
+      --error-border: #f5c6cb;
+      --pre-bg: #2c3e50;
+      --pre-text: #ecf0f1;
+    }
+
+    [data-theme="dark"] {
+      --bg-primary: #1a1a1a;
+      --bg-secondary: #2d2d2d;
+      --bg-header: #1e1e1e;
+      --text-primary: #e0e0e0;
+      --text-secondary: #a0a0a0;
+      --text-inverse: #ffffff;
+      --border-color: #404040;
+      --shadow: rgba(0, 0, 0, 0.3);
+      --btn-primary: #3498db;
+      --btn-primary-hover: #5dade2;
+      --btn-secondary: #5a5a5a;
+      --btn-secondary-hover: #707070;
+      --status-bg: #3a3a3a;
+      --status-text: #e0e0e0;
+      --status-loading-bg: #5a4a2a;
+      --status-loading-text: #f1c40f;
+      --status-ready-bg: #2a4a2a;
+      --status-ready-text: #2ecc71;
+      --status-error-bg: #4a2a2a;
+      --status-error-text: #e74c3c;
+      --error-bg: #4a2a2a;
+      --error-text: #e74c3c;
+      --error-border: #e74c3c;
+      --pre-bg: #1e1e1e;
+      --pre-text: #d4d4d4;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      padding: 20px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      box-shadow: 0 2px 8px var(--shadow);
+      overflow: hidden;
+    }
+
+    header {
+      background: var(--bg-header);
+      color: var(--text-inverse);
+      padding: 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .header-left h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .theme-toggle {
+      background: transparent;
+      border: 2px solid var(--text-inverse);
+      color: var(--text-inverse);
+      padding: 8px 16px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: all 0.2s;
+    }
+
+    .theme-toggle:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .status {
+      padding: 15px 20px;
+      background: var(--status-bg);
+      border-bottom: 1px solid var(--border-color);
+      font-size: 14px;
+      color: var(--status-text);
+      transition: background-color 0.3s, color 0.3s;
+    }
+
+    .status.loading {
+      background: var(--status-loading-bg);
+      color: var(--status-loading-text);
+    }
+
+    .status.ready {
+      background: var(--status-ready-bg);
+      color: var(--status-ready-text);
+    }
+
+    .status.error {
+      background: var(--status-error-bg);
+      color: var(--status-error-text);
+    }
+
+    .content {
+      padding: 20px;
+    }
+
+    .editor-section {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--text-primary);
+    }
+
+    #editor-container {
+      width: 100%;
+      height: 500px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    #editor-container.drag-over {
+      border-color: var(--btn-primary);
+      border-width: 2px;
+      box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+    }
+
+    .button-group {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    button {
+      padding: 10px 20px;
+      background: var(--btn-primary);
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      transition: background 0.2s;
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--btn-primary-hover);
+    }
+
+    button:disabled {
+      background: var(--btn-secondary);
+      cursor: not-allowed;
+    }
+
+    button.secondary {
+      background: var(--btn-secondary);
+    }
+
+    button.secondary:hover:not(:disabled) {
+      background: var(--btn-secondary-hover);
+    }
+
+    .output-section {
+      margin-top: 20px;
+    }
+
+    pre {
+      background: var(--pre-bg);
+      color: var(--pre-text);
+      padding: 15px;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .error {
+      background: var(--error-bg);
+      color: var(--error-text);
+      padding: 12px;
+      border-radius: 4px;
+      margin-bottom: 15px;
+      border-left: 4px solid var(--error-border);
+    }
+
+    select {
+      background: var(--bg-secondary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+    }
+
+    /* ルールカード表示 */
+    .rules-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+      gap: 15px;
+      margin-top: 10px;
+    }
+
+    .rule-card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      padding: 15px;
+      transition: all 0.2s;
+      cursor: pointer;
+    }
+
+    .rule-card:hover {
+      box-shadow: 0 4px 12px var(--shadow);
+      border-color: var(--btn-primary);
+      transform: translateY(-2px);
+    }
+
+    .rule-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .rule-card-id {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-weight: 600;
+    }
+
+    .rule-card-line {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+
+    .rule-card-lhs {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--btn-primary);
+      margin-bottom: 10px;
+    }
+
+    .rule-card-arrow {
+      color: var(--text-secondary);
+      margin: 0 8px;
+    }
+
+    .rule-card-rhs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .rule-symbol {
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: 'Courier New', monospace;
+    }
+
+    .rule-symbol.terminal {
+      background: rgba(46, 204, 113, 0.15);
+      color: #27ae60;
+      border: 1px solid rgba(46, 204, 113, 0.3);
+    }
+
+    .rule-symbol.nonterminal {
+      background: rgba(52, 152, 219, 0.15);
+      color: #2980b9;
+      border: 1px solid rgba(52, 152, 219, 0.3);
+    }
+
+    .rule-symbol.empty {
+      font-style: italic;
+      color: var(--text-secondary);
+    }
+
+    [data-theme="dark"] .rule-symbol.terminal {
+      background: rgba(46, 204, 113, 0.2);
+      color: #2ecc71;
+      border-color: rgba(46, 204, 113, 0.4);
+    }
+
+    [data-theme="dark"] .rule-symbol.nonterminal {
+      background: rgba(52, 152, 219, 0.2);
+      color: #3498db;
+      border-color: rgba(52, 152, 219, 0.4);
+    }
+
+    .view-toggle {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 15px;
+      justify-content: flex-end;
+    }
+
+    .view-toggle button {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    .view-toggle button.active {
+      background: var(--btn-primary);
+      color: white;
+    }
+
+    /* モーダル */
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: var(--bg-secondary);
+      border-radius: 8px;
+      padding: 25px;
+      max-width: 600px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 2px solid var(--border-color);
+    }
+
+    .modal-header h3 {
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 20px;
+    }
+
+    .modal-close {
+      background: transparent;
+      border: none;
+      font-size: 24px;
+      cursor: pointer;
+      color: var(--text-secondary);
+      padding: 0;
+      width: 30px;
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .modal-close:hover {
+      color: var(--text-primary);
+      background: var(--border-color);
+      border-radius: 4px;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .form-group input,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      font-size: 14px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'Courier New', monospace;
+    }
+
+    .form-group input:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: var(--btn-primary);
+      box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+    }
+
+    .symbols-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 10px;
+      background: var(--bg-primary);
+      border-radius: 4px;
+      min-height: 50px;
+    }
+
+    .symbol-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      background: var(--btn-secondary);
+      color: white;
+      border-radius: 4px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+
+    .symbol-tag button {
+      background: transparent;
+      border: none;
+      color: white;
+      cursor: pointer;
+      padding: 0;
+      font-size: 16px;
+      line-height: 1;
+    }
+
+    .symbol-tag button:hover {
+      color: #e74c3c;
+    }
+
+    .symbol-input-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .symbol-input-group input {
+      flex: 1;
+    }
+
+    .symbol-input-group button {
+      padding: 10px 20px;
+      white-space: nowrap;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+      margin-top: 25px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .add-rule-btn {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: var(--btn-primary);
+      color: white;
+      font-size: 24px;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      transition: all 0.2s;
+      z-index: 100;
+    }
+
+    .add-rule-btn:hover {
+      transform: scale(1.1);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+    }
+
+    .rule-card-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .rule-card-actions button {
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+
+    /* レスポンシブデザイン */
+    @media (max-width: 768px) {
+      body {
+        padding: 10px;
+      }
+
+      header {
+        flex-direction: column;
+        gap: 15px;
+        align-items: flex-start;
+      }
+
+      .header-left h1 {
+        font-size: 20px;
+      }
+
+      .subtitle {
+        font-size: 12px;
+      }
+
+      .theme-toggle {
+        width: 100%;
+        padding: 10px;
+      }
+
+      .content {
+        padding: 15px;
+      }
+
+      #editor-container {
+        height: 400px;
+      }
+
+      .button-group {
+        flex-wrap: wrap;
+      }
+
+      button {
+        flex: 1 1 calc(50% - 5px);
+        min-width: 120px;
+      }
+
+      .editor-section > div:first-child {
+        flex-direction: column !important;
+        align-items: flex-start !important;
+      }
+
+      .editor-section label[for="presetSelect"] {
+        margin-bottom: 5px;
+      }
+
+      select {
+        width: 100%;
+        padding: 8px;
+      }
+
+      .rules-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .view-toggle {
+        justify-content: flex-start;
+        width: 100%;
+      }
+
+      .view-toggle button {
+        flex: 1;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .header-left h1 {
+        font-size: 18px;
+      }
+
+      #editor-container {
+        height: 300px;
+      }
+
+      button {
+        flex: 1 1 100%;
+        min-width: 100%;
+      }
+
+      pre {
+        font-size: 11px;
+        padding: 10px;
+      }
+
+      .rule-card {
+        padding: 12px;
+      }
+
+      .rule-card-lhs {
+        font-size: 14px;
+      }
+
+      .rule-symbol {
+        font-size: 11px;
+        padding: 3px 8px;
+      }
+
+      .add-rule-btn {
+        bottom: 20px;
+        right: 20px;
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+      }
+
+      .modal-content {
+        width: 95%;
+        padding: 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div class="header-left">
+        <h1>Lrama Corral</h1>
+        <p class="subtitle">Visual Editor for Lrama Grammar Files</p>
+      </div>
+      <button id="themeToggle" class="theme-toggle">🌙 Dark Mode</button>
+    </header>
+
+    <div id="status" class="status loading">
+      Initializing... Loading Ruby Wasm VM
+    </div>
+
+    <div class="content">
+      <div class="editor-section">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+          <label for="editor" style="margin-bottom: 0;">Lrama Grammar (.y file)</label>
+          <div>
+            <label for="presetSelect" style="font-size: 14px; font-weight: normal; margin-right: 8px;">Sample:</label>
+            <select id="presetSelect" style="padding: 4px 8px; border: 1px solid #bdc3c7; border-radius: 4px; font-size: 14px;">
+              <option value="">-- Select Sample --</option>
+              <option value="calc">Calculator</option>
+              <option value="simple">Simple</option>
+              <option value="json">JSON</option>
+              <option value="sql">SQL</option>
+              <option value="lang">Programming Language</option>
+              <option value="precedence">Precedence Demo</option>
+              <option value="prologue">With Prologue</option>
+            </select>
+          </div>
+        </div>
+        <div id="editor-container"></div>
+      </div>
+
+      <div class="button-group">
+        <button id="parseBtn" disabled>Parse</button>
+        <button id="validateBtn" class="secondary" disabled>Validate</button>
+        <input type="file" id="fileInput" accept=".y,.yacc,.yy" style="display: none;">
+        <button id="uploadBtn" class="secondary" disabled>Upload File</button>
+        <button id="downloadBtn" class="secondary" disabled>Download .y</button>
+        <button id="exportBtn" class="secondary" disabled>Export Report</button>
+        <button id="undoBtn" class="secondary" disabled title="Undo (Ctrl/Cmd+Z)">↶ Undo</button>
+        <button id="redoBtn" class="secondary" disabled title="Redo (Ctrl/Cmd+Shift+Z)">↷ Redo</button>
+      </div>
+
+      <div id="output" class="output-section"></div>
+    </div>
+  </div>
+
+  <!-- 新規ルール追加ボタン -->
+  <button id="addRuleBtn" class="add-rule-btn" title="Add New Rule" style="display: none;">+</button>
+
+  <!-- シンボル編集モーダル -->
+  <div id="symbolModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="symbolModalTitle">Edit Symbol</h3>
+        <button class="modal-close" id="symbolModalClose">×</button>
+      </div>
+
+      <form id="symbolForm">
+        <div class="form-group">
+          <label for="symbolName">Symbol Name</label>
+          <input type="text" id="symbolName" placeholder="e.g., NUMBER, expr" required>
+        </div>
+
+        <div class="form-group">
+          <label for="symbolType">Type (optional)</label>
+          <input type="text" id="symbolType" placeholder="e.g., <int>, <node>">
+        </div>
+
+        <div class="form-group" id="tokenIdGroup" style="display: none;">
+          <label for="tokenId">Token ID (optional)</label>
+          <input type="number" id="tokenId" placeholder="e.g., 258">
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="symbolModalCancel" class="secondary">Cancel</button>
+          <button type="submit" id="symbolModalSave">Save Symbol</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ルール編集モーダル -->
+  <div id="ruleModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modalTitle">Add New Rule</h3>
+        <button class="modal-close" id="modalClose">×</button>
+      </div>
+
+      <form id="ruleForm">
+        <div class="form-group">
+          <label for="ruleLHS">Left-Hand Side (LHS)</label>
+          <input type="text" id="ruleLHS" placeholder="e.g., expr" required>
+        </div>
+
+        <div class="form-group">
+          <label>Right-Hand Side (RHS)</label>
+          <div class="symbols-list" id="rhsSymbols"></div>
+          <div class="symbol-input-group">
+            <input type="text" id="symbolInput" placeholder="Add symbol (e.g., term, PLUS)">
+            <button type="button" id="addSymbolBtn" class="secondary">Add Symbol</button>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button type="button" id="modalCancel" class="secondary">Cancel</button>
+          <button type="submit" id="modalSave">Save Rule</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+{
+  "name": "lrama-corral",
+  "version": "0.1.0",
+  "description": "A visual editor for Lrama grammar files (.y files) powered by Ruby Wasm",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "build:wasm": "bash scripts/build-wasm.sh"
+  },
+  "dependencies": {
+    "@ruby/wasm-wasi": "^2.5.0",
+    "monaco-editor": "^0.45.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0"
+  },
+  "keywords": [
+    "lrama",
+    "parser",
+    "grammar",
+    "lalr",
+    "ruby",
+    "wasm"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ydah/lrama-corral"
+  },
+  "license": "MIT"
+}
