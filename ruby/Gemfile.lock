@@ -1,0 +1,52 @@
+GEM
+  remote: https://rubygems.org/
+  specs:
+    js (2.7.2)
+    logger (1.7.0)
+    lrama (0.7.0)
+    railroad_diagrams (0.3.0)
+    ruby_wasm (2.7.2)
+      logger
+    ruby_wasm (2.7.2-aarch64-linux)
+      logger
+    ruby_wasm (2.7.2-aarch64-linux-musl)
+      logger
+    ruby_wasm (2.7.2-arm64-darwin)
+      logger
+    ruby_wasm (2.7.2-x86_64-darwin)
+      logger
+    ruby_wasm (2.7.2-x86_64-linux)
+      logger
+    ruby_wasm (2.7.2-x86_64-linux-musl)
+      logger
+
+PLATFORMS
+  aarch64-linux
+  aarch64-linux-musl
+  arm64-darwin
+  ruby
+  x86_64-darwin
+  x86_64-linux
+  x86_64-linux-musl
+
+DEPENDENCIES
+  js
+  lrama
+  railroad_diagrams
+  ruby_wasm
+
+CHECKSUMS
+  js (2.7.2) sha256=7ffa18df04f0f27829d66c3e268e71f4ee0349a9dd4dd884487be5836a73bc1a
+  logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
+  lrama (0.7.0) sha256=8da5866d38e440cbc552c662d723f5b9baa6e439eb12e9ee9b278d549041a6fb
+  railroad_diagrams (0.3.0) sha256=f28dd50a972e71b272ef1459bae6917ff6cb28ff71192e7b04ee348c19b8c529
+  ruby_wasm (2.7.2) sha256=6e197a3d48c83240fc741027d9a38ced8637604d2b77372b5ae587f742a1420d
+  ruby_wasm (2.7.2-aarch64-linux) sha256=be2243a5d91d5cba45d0acd567b01b3cee24323f153423b2b45546f9dc1288fa
+  ruby_wasm (2.7.2-aarch64-linux-musl) sha256=7fda4480a52a49afb6e3badf641f57c9e2d69d635d0613d054a06bf227635b3d
+  ruby_wasm (2.7.2-arm64-darwin) sha256=bf6762cec7886513d8cf2c9aaec961ae05c74ddac0e8e6f5b4ac135d56b9f13d
+  ruby_wasm (2.7.2-x86_64-darwin) sha256=7f7593519c9727303425c90abc403a227394025824fd35c0218406719e0fe584
+  ruby_wasm (2.7.2-x86_64-linux) sha256=b598670db8241f9ee6419c33d56f5675df7b19bab6507376502ea09222411e10
+  ruby_wasm (2.7.2-x86_64-linux-musl) sha256=861003277eb82ed39594ae80dd3512e1b97d51997db0d403a7c86e018220d933
+
+BUNDLED WITH
+  4.0.2
