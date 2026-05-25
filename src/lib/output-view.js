@@ -26,6 +26,26 @@ export function appendJsonResult(outputEl, title, data) {
   outputEl.appendChild(preEl);
 }
 
+export function appendCollapsibleJsonResult(outputEl, title, data, options = {}) {
+  const documentRef = outputEl.ownerDocument;
+  const detailsEl = documentRef.createElement('details');
+  detailsEl.open = Boolean(options.open);
+  detailsEl.style.marginTop = '12px';
+
+  const summaryEl = documentRef.createElement('summary');
+  summaryEl.textContent = title;
+  summaryEl.style.cursor = 'pointer';
+  summaryEl.style.fontWeight = '600';
+  summaryEl.style.color = '#2c3e50';
+
+  const preEl = documentRef.createElement('pre');
+  preEl.textContent = JSON.stringify(data, null, 2);
+  preEl.style.marginTop = '10px';
+
+  detailsEl.append(summaryEl, preEl);
+  outputEl.appendChild(detailsEl);
+}
+
 export function createErrorElement(documentRef, message, location = null) {
   const errorDiv = documentRef.createElement('div');
   errorDiv.className = 'error';

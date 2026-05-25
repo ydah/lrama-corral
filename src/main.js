@@ -2,6 +2,7 @@ import { lramaBridge } from './lib/lrama-bridge.js';
 import './styles.css';
 import { createLifecycle } from './lib/lifecycle.js';
 import {
+  appendCollapsibleJsonResult,
   appendError,
   appendJsonResult,
   clearAnalysisOutput,
@@ -1413,6 +1414,10 @@ function showResult(title, data) {
   appendJsonResult(outputEl, title, data);
 }
 
+function showDetailedResult(title, data, options = {}) {
+  appendCollapsibleJsonResult(outputEl, title, data, options);
+}
+
 /**
  * Display structured parse result
  * @param {GrammarResult} data
@@ -1420,7 +1425,7 @@ function showResult(title, data) {
  */
 function showStructuredResult(data, previousResult = null) {
   if (!data.success || !data.grammar) {
-    showResult('Parse Result', data);
+    showDetailedResult('Parse Result', data);
     return;
   }
 
@@ -3937,8 +3942,7 @@ async function handleParse() {
         showError('Failed to parse');
       }
 
-      // Also display details in JSON format
-      showResult('Error Details', result);
+      showDetailedResult('Error Details', result);
     }
   } catch (error) {
     updateStatus('An error occurred', 'error');
