@@ -114,3 +114,24 @@ test('keeps separate grammar tabs and parse results', async ({ page }) => {
   await expect(page.locator('#status')).toContainText('Tab "simple.y" restored');
   await expect(page.getByRole('heading', { name: 'Grammar Structure' })).toBeVisible();
 });
+
+test('renders nonblank parser visuals on desktop and mobile', async ({ page }) => {
+  for (const viewport of [
+    { width: 1280, height: 900 },
+    { width: 390, height: 844 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await loadCalcSample(page);
+    await page.getByRole('button', { name: 'Parse grammar' }).click();
+    await expect(page.locator('#status')).toContainText('Parse successful', { timeout: 90_000 });
+
+    const svg = page.locator('#output svg').first();
+    await expect(svg).toBeVisible();
+    const box = await svg.boundingBox();
+    expect(box?.width).toBeGreaterThan(100);
+    expect(box?.height).toBeGreaterThan(80);
+
+    const screenshot = await svg.screenshot();
+    expect(new Set(screenshot).size).toBeGreaterThan(20);
+  }
+});
