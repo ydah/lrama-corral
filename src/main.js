@@ -20,6 +20,7 @@ import {
 } from './lib/file-names.js';
 import { readStorage, writeStorage } from './lib/safe-storage.js';
 import { generateHTMLReport } from './lib/report-export.js';
+import { calculateStateGraphLayout } from './lib/state-graph-layout.js';
 import { downloadPNG, downloadSVG } from './lib/svg-export.js';
 import { registerYaccLanguage } from './lib/yacc-language.js';
 import {
@@ -2550,9 +2551,8 @@ function createStateTransitionSection(stateTransitions) {
  * Create SVG for state transition graph
  */
 function createStateTransitionGraph(stateTransitions, options = {}) {
-  const width = 1200;
-  const height = Math.max(600, stateTransitions.length * 80);
   const nodeRadius = 30;
+  const { width, height, positions } = calculateStateGraphLayout(stateTransitions, { nodeRadius });
   const markerId = `state-arrowhead-${appState.svgIdCounter++}`;
 
   // Create SVG element
@@ -2563,9 +2563,6 @@ function createStateTransitionGraph(stateTransitions, options = {}) {
   svg.style.background = 'var(--bg-primary)';
   svg.style.border = '1px solid var(--border-color)';
   svg.style.borderRadius = '4px';
-
-  // Layout calculation (simple hierarchical layout)
-  const positions = calculateStatePositions(stateTransitions, width, height, nodeRadius);
 
   // Arrow marker definition
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
@@ -2664,72 +2661,6 @@ function addStateGraphLegend(svg, width) {
   });
 
   svg.appendChild(legend);
-}
-
-/**
- * Calculate state positions (simple level-based layout)
- */
-function calculateStatePositions(stateTransitions, width, height, nodeRadius) {
-  const positions = {};
-  const margin = 50;
-  const usableWidth = width - 2 * margin;
-  const usableHeight = height - 2 * margin;
-
-  // Calculate hierarchical levels (BFS)
-  const levels = {};
-  const visited = new Set();
-  const queue = [0]; // Start from state 0
-  levels[0] = 0;
-  visited.add(0);
-
-  while (queue.length > 0) {
-    const stateId = queue.shift();
-    const state = stateTransitions.find(s => s.id === stateId);
-    if (!state) continue;
-
-    const currentLevel = levels[stateId];
-
-    // Add transition destinations
-    [...state.shifts, ...state.gotos].forEach(trans => {
-      if (!visited.has(trans.to_state)) {
-        visited.add(trans.to_state);
-        levels[trans.to_state] = currentLevel + 1;
-        queue.push(trans.to_state);
-      }
-    });
-  }
-
-  // Add unvisited states
-  stateTransitions.forEach((state, index) => {
-    if (!visited.has(state.id)) {
-      levels[state.id] = Math.floor(index / 5);
-    }
-  });
-
-  // Group by level
-  const levelGroups = {};
-  Object.keys(levels).forEach(stateId => {
-    const level = levels[stateId];
-    if (!levelGroups[level]) levelGroups[level] = [];
-    levelGroups[level].push(parseInt(stateId));
-  });
-
-  // Calculate positions
-  const maxLevel = Math.max(...Object.values(levels));
-  Object.keys(levelGroups).forEach(level => {
-    const states = levelGroups[level];
-    const levelNum = parseInt(level);
-    const x = maxLevel === 0
-      ? width / 2
-      : margin + (levelNum / maxLevel) * usableWidth;
-
-    states.forEach((stateId, index) => {
-      const y = margin + ((index + 0.5) / states.length) * usableHeight;
-      positions[stateId] = { x, y };
-    });
-  });
-
-  return positions;
 }
 
 /**
