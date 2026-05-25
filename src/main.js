@@ -173,10 +173,12 @@ function initMonacoEditor() {
   const initialValue = activeTab?.content || getDefaultGrammarSource();
   appState.currentFileName = activeTab?.fileName || DEFAULT_DOWNLOAD_FILENAME;
   appState.isDirty = Boolean(activeTab?.isDirty);
+  const initialModel = activeTab
+    ? ensureEditorTabModel(activeTab)
+    : monaco.editor.createModel(initialValue, 'yacc');
 
   editor = monaco.editor.create(editorContainer, {
-    value: initialValue,
-    language: 'yacc',
+    model: initialModel,
     theme: isDarkMode ? 'yacc-theme-dark' : 'yacc-theme',
     automaticLayout: true,
     minimap: { enabled: false },
@@ -189,9 +191,6 @@ function initMonacoEditor() {
       horizontalScrollbarSize: 10
     }
   });
-  if (activeTab) {
-    activeTab.model = editor.getModel();
-  }
 
   // Update Undo/Redo button state when editor content changes
   appLifecycle.addDisposable(editor.onDidChangeModelContent(() => {
