@@ -207,6 +207,85 @@ header {
   margin-bottom: 20px;
 }
 
+.file-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.file-tabs {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.file-tab-item {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  border: 1px solid var(--border-color);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: var(--bg-primary);
+}
+
+.file-tab-item.active {
+  background: var(--bg-secondary);
+  border-color: var(--btn-primary);
+}
+
+.file-tab {
+  min-width: 0;
+  padding: 7px 10px;
+  background: transparent;
+  color: var(--text-primary);
+  border: none;
+  border-radius: 4px 0 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tab:hover:not(:disabled),
+.file-tab:focus {
+  background: var(--status-bg);
+  color: var(--text-primary);
+}
+
+.file-tab[aria-selected="true"] {
+  color: var(--btn-primary);
+}
+
+.file-tab-close {
+  flex: 0 0 auto;
+  min-width: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border-radius: 0 4px 0 0;
+}
+
+.file-tab-close:hover:not(:disabled),
+.file-tab-close:focus {
+  background: var(--status-bg);
+  color: var(--status-error-text);
+}
+
+.file-tab-add {
+  flex: 0 0 auto;
+  min-width: 36px;
+  width: 36px;
+  height: 32px;
+  padding: 0;
+  margin-bottom: 4px;
+}
+
 label {
   display: block;
   font-weight: 600;
@@ -734,9 +813,32 @@ select {
     flex-wrap: wrap;
   }
 
+  .file-tabs-bar {
+    align-items: stretch;
+  }
+
+  .file-tab-item {
+    max-width: 180px;
+  }
+
   button {
     flex: 1 1 calc(50% - 5px);
     min-width: 120px;
+  }
+
+  .file-tab {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .file-tab-close {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  .file-tab-add {
+    flex: 0 0 auto;
+    min-width: 36px;
   }
 
   .editor-section > div:first-child {
@@ -781,6 +883,21 @@ select {
     min-width: 100%;
   }
 
+  .file-tab {
+    flex: 0 1 auto;
+    min-width: 0;
+  }
+
+  .file-tab-close {
+    flex: 0 0 auto;
+    min-width: 0;
+  }
+
+  .file-tab-add {
+    flex: 0 0 auto;
+    min-width: 36px;
+  }
+
   pre {
     font-size: 11px;
     padding: 10px;
@@ -797,6 +914,10 @@ select {
   .rule-symbol {
     font-size: 11px;
     padding: 3px 8px;
+  }
+
+  .file-tab-item {
+    max-width: 150px;
   }
 
   .add-rule-btn {

@@ -89,3 +89,28 @@ test('uploads a grammar file and toggles theme', async ({ page }) => {
   await page.getByRole('button', { name: 'Toggle dark mode' }).click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
+
+test('keeps separate grammar tabs and parse results', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Parse grammar' })).toBeEnabled();
+
+  await expect(page.getByRole('tab', { name: 'Open grammar.y' })).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('button', { name: 'New grammar tab' }).click();
+  await expect(page.getByRole('tab', { name: 'Open grammar-2.y' })).toHaveAttribute('aria-selected', 'true');
+
+  await page.locator('#presetSelect').selectOption('simple');
+  await expect(page.locator('#status')).toContainText('Sample loaded');
+  await expect(page.getByRole('tab', { name: 'Open simple.y' })).toHaveAttribute('aria-selected', 'true');
+
+  await page.getByRole('button', { name: 'Parse grammar' }).click();
+  await expect(page.locator('#status')).toContainText('Parse successful', { timeout: 90_000 });
+  await expect(page.getByRole('heading', { name: 'Grammar Structure' })).toBeVisible();
+
+  await page.getByRole('tab', { name: 'Open grammar.y' }).click();
+  await expect(page.locator('#status')).toContainText('Tab "grammar.y" ready');
+  await expect(page.getByRole('heading', { name: 'Grammar Structure' })).toHaveCount(0);
+
+  await page.getByRole('tab', { name: 'Open simple.y' }).click();
+  await expect(page.locator('#status')).toContainText('Tab "simple.y" restored');
+  await expect(page.getByRole('heading', { name: 'Grammar Structure' })).toBeVisible();
+});

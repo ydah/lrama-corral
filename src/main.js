@@ -2,7 +2,9 @@ import { lramaBridge } from './lib/lrama-bridge.js';
 import './styles.css';
 import {
   clearParseState,
+  createEditorTab,
   createAppState,
+  getActiveEditorTab,
   invalidateParserRequests,
 } from './lib/app-state.js';
 import { createLifecycle } from './lib/lifecycle.js';
@@ -47,6 +49,8 @@ self.MonacoEnvironment = {
 // DOM elements
 const statusEl = document.getElementById('status');
 const editorContainer = document.getElementById('editor-container');
+const fileTabs = document.getElementById('fileTabs');
+const addFileTabBtn = document.getElementById('addFileTabBtn');
 const parseBtn = document.getElementById('parseBtn');
 const validateBtn = document.getElementById('validateBtn');
 const resetVmBtn = document.getElementById('resetVmBtn');
@@ -110,6 +114,7 @@ const DRAFT_STORAGE_KEY = 'lrama-corral:draft';
 const THEME_STORAGE_KEY = 'lrama-corral:theme';
 const MAX_GRAMMAR_FILE_SIZE = 1024 * 1024;
 const AUTO_PARSE_DELAY_MS = 700;
+const MAX_EDITOR_TABS = 3;
 const GRAPH_ZOOM_STEP = 0.15;
 const GRAPH_MIN_ZOOM = 0.35;
 const GRAPH_MAX_ZOOM = 2.5;
@@ -125,20 +130,14 @@ const STATE_GRAPH_COLORS = {
 };
 let draftSaveTimer = null;
 let autoParseTimer = null;
+let suppressEditorChange = false;
 const appLifecycle = createLifecycle();
 const appState = createAppState({
   currentFileName: DEFAULT_DOWNLOAD_FILENAME,
 });
 
-/**
- * Initialize Monaco Editor
- */
-function initMonacoEditor() {
-  registerYaccLanguage(monaco, {
-    getGrammar: () => appState.latestParseResult?.grammar,
-  });
-
-  const defaultValue = `%token NUMBER
+function getDefaultGrammarSource() {
+  return `%token NUMBER
 %token PLUS MINUS TIMES DIVIDE
 %token LPAREN RPAREN
 
@@ -157,13 +156,22 @@ term: factor
 factor: NUMBER
       | LPAREN expr RPAREN
       ;`;
+}
+
+/**
+ * Initialize Monaco Editor
+ */
+function initMonacoEditor() {
+  registerYaccLanguage(monaco, {
+    getGrammar: () => appState.latestParseResult?.grammar,
+  });
 
   const draft = loadDraft();
-  const initialValue = draft?.content || defaultValue;
-  if (draft?.fileName) {
-    appState.currentFileName = draft.fileName;
-    appState.isDirty = true;
-  }
+  initializeEditorTabs(draft, getDefaultGrammarSource());
+  const activeTab = getActiveEditorTab(appState);
+  const initialValue = activeTab?.content || getDefaultGrammarSource();
+  appState.currentFileName = activeTab?.fileName || DEFAULT_DOWNLOAD_FILENAME;
+  appState.isDirty = Boolean(activeTab?.isDirty);
 
   editor = monaco.editor.create(editorContainer, {
     value: initialValue,
@@ -184,15 +192,18 @@ factor: NUMBER
   // Update Undo/Redo button state when editor content changes
   appLifecycle.addDisposable(editor.onDidChangeModelContent(() => {
     updateUndoRedoButtons();
+    if (suppressEditorChange) return;
     invalidateParseResult();
     scheduleDraftSave();
     scheduleAutoParse();
     appState.isDirty = true;
+    syncActiveEditorTab();
   }));
   appLifecycle.add(() => editor?.dispose());
 
   // Update initial button state
   updateUndoRedoButtons();
+  renderFileTabs();
 
   return editor;
 }
@@ -284,14 +295,73 @@ function loadDraft() {
   }
 }
 
+function normalizeDraftTab(tab, index) {
+  const id = typeof tab?.id === 'string' && tab.id ? tab.id : `tab-${index + 1}`;
+  const fileName = sanitizeDownloadFileName(tab?.fileName || DEFAULT_DOWNLOAD_FILENAME);
+  return createEditorTab({
+    id,
+    fileName,
+    content: typeof tab?.content === 'string' ? tab.content : '',
+    isDirty: Boolean(tab?.isDirty),
+  });
+}
+
+function initializeEditorTabs(draft, defaultContent) {
+  if (Array.isArray(draft?.tabs) && draft.tabs.length > 0) {
+    appState.editorTabs = draft.tabs.slice(0, MAX_EDITOR_TABS).map(normalizeDraftTab);
+    appState.activeEditorTabId = appState.editorTabs.some(tab => tab.id === draft.activeTabId)
+      ? draft.activeTabId
+      : appState.editorTabs[0].id;
+    appState.nextEditorTabId = Math.max(
+      Number(draft.nextEditorTabId) || 1,
+      appState.editorTabs.length + 1
+    );
+    return;
+  }
+
+  const initialTab = createEditorTab({
+    id: 'tab-1',
+    fileName: sanitizeDownloadFileName(draft?.fileName || DEFAULT_DOWNLOAD_FILENAME),
+    content: typeof draft?.content === 'string' ? draft.content : defaultContent,
+    isDirty: Boolean(draft?.content),
+  });
+  appState.editorTabs = [initialTab];
+  appState.activeEditorTabId = initialTab.id;
+  appState.nextEditorTabId = 2;
+}
+
+function syncActiveEditorTab() {
+  const tab = getActiveEditorTab(appState);
+  if (!tab) return;
+
+  tab.fileName = appState.currentFileName;
+  tab.isDirty = appState.isDirty;
+  tab.latestParseResult = appState.latestParseResult;
+  tab.latestParsedSource = appState.latestParsedSource;
+  if (editor) {
+    tab.content = editor.getValue();
+  }
+  renderFileTabs();
+}
+
+function activeTabsForStorage() {
+  syncActiveEditorTab();
+  return appState.editorTabs.map(tab => ({
+    id: tab.id,
+    fileName: tab.fileName,
+    content: tab.content,
+    isDirty: tab.isDirty,
+  }));
+}
+
 function scheduleDraftSave() {
   if (!editor) return;
   window.clearTimeout(draftSaveTimer);
   draftSaveTimer = window.setTimeout(() => {
-    const content = editor.getValue();
     writeStorage(DRAFT_STORAGE_KEY, JSON.stringify({
-      content,
-      fileName: appState.currentFileName,
+      tabs: activeTabsForStorage(),
+      activeTabId: appState.activeEditorTabId,
+      nextEditorTabId: appState.nextEditorTabId,
       updatedAt: new Date().toISOString(),
     }));
   }, 300);
@@ -401,6 +471,7 @@ function invalidateParseResult() {
 
 function markContentClean() {
   appState.isDirty = false;
+  syncActiveEditorTab();
 }
 
 function confirmDiscardDirtyContent() {
@@ -420,6 +491,140 @@ function setMobileView(mode) {
   if (appState.mobileViewMode === 'editor') {
     editor?.layout();
   }
+}
+
+function renderFileTabs() {
+  fileTabs.replaceChildren();
+
+  appState.editorTabs.forEach(tab => {
+    const item = document.createElement('div');
+    item.className = `file-tab-item${tab.id === appState.activeEditorTabId ? ' active' : ''}`;
+
+    const tabButton = document.createElement('button');
+    tabButton.type = 'button';
+    tabButton.className = 'file-tab';
+    tabButton.setAttribute('role', 'tab');
+    tabButton.setAttribute('aria-selected', String(tab.id === appState.activeEditorTabId));
+    tabButton.setAttribute('aria-label', `Open ${tab.fileName}`);
+    tabButton.title = tab.fileName;
+    tabButton.textContent = `${tab.fileName}${tab.isDirty ? ' *' : ''}`;
+    tabButton.addEventListener('click', () => switchEditorTab(tab.id));
+    item.appendChild(tabButton);
+
+    const closeButton = document.createElement('button');
+    closeButton.type = 'button';
+    closeButton.className = 'file-tab-close';
+    closeButton.textContent = 'x';
+    closeButton.setAttribute('aria-label', `Close ${tab.fileName}`);
+    closeButton.addEventListener('click', event => {
+      event.stopPropagation();
+      closeEditorTab(tab.id);
+    });
+    item.appendChild(closeButton);
+
+    fileTabs.appendChild(item);
+  });
+
+  addFileTabBtn.disabled = appState.editorTabs.length >= MAX_EDITOR_TABS;
+}
+
+function setEditorContentSilently(content) {
+  suppressEditorChange = true;
+  try {
+    const model = editor?.getModel();
+    if (model) {
+      model.setValue(content);
+    }
+  } finally {
+    suppressEditorChange = false;
+  }
+  updateUndoRedoButtons();
+}
+
+function restoreTabOutput(tab) {
+  clearOutput();
+  exportBtn.disabled = !tab.latestParseResult;
+  setParseMarkers([]);
+
+  if (tab.latestParseResult) {
+    showStructuredResult(tab.latestParseResult);
+    updateStatus(`Tab "${tab.fileName}" restored`, 'ready');
+    return;
+  }
+
+  updateStatus(`Tab "${tab.fileName}" ready - Click Parse button`, 'ready');
+}
+
+function switchEditorTab(tabId) {
+  if (tabId === appState.activeEditorTabId) return;
+
+  syncActiveEditorTab();
+  const targetTab = appState.editorTabs.find(tab => tab.id === tabId);
+  if (!targetTab) return;
+
+  appState.activeEditorTabId = targetTab.id;
+  appState.currentFileName = targetTab.fileName;
+  appState.isDirty = targetTab.isDirty;
+  appState.latestParseResult = targetTab.latestParseResult;
+  appState.latestParsedSource = targetTab.latestParsedSource;
+  invalidateParserRequests(appState);
+
+  setEditorContentSilently(targetTab.content);
+  restoreTabOutput(targetTab);
+  renderFileTabs();
+  scheduleDraftSave();
+}
+
+function createNewEditorTab() {
+  syncActiveEditorTab();
+  if (appState.editorTabs.length >= MAX_EDITOR_TABS) {
+    updateStatus(`Up to ${MAX_EDITOR_TABS} grammar tabs can be open at once`, 'loading');
+    return;
+  }
+
+  const tabNumber = appState.nextEditorTabId;
+  appState.nextEditorTabId += 1;
+  const tab = createEditorTab({
+    id: `tab-${tabNumber}`,
+    fileName: `grammar-${tabNumber}.y`,
+    content: '',
+  });
+  appState.editorTabs.push(tab);
+  switchEditorTab(tab.id);
+}
+
+function closeEditorTab(tabId) {
+  const tabIndex = appState.editorTabs.findIndex(tab => tab.id === tabId);
+  if (tabIndex === -1) return;
+
+  const tab = appState.editorTabs[tabIndex];
+  if (tab.id === appState.activeEditorTabId) {
+    syncActiveEditorTab();
+  }
+
+  if (tab.isDirty && !confirm(`Close "${tab.fileName}" with unsaved edits?`)) {
+    return;
+  }
+
+  appState.editorTabs.splice(tabIndex, 1);
+  if (appState.editorTabs.length === 0) {
+    appState.editorTabs.push(createEditorTab({ content: getDefaultGrammarSource() }));
+  }
+
+  if (tab.id === appState.activeEditorTabId) {
+    const nextTab = appState.editorTabs[Math.max(0, tabIndex - 1)];
+    appState.activeEditorTabId = nextTab.id;
+    appState.currentFileName = nextTab.fileName;
+    appState.isDirty = nextTab.isDirty;
+    appState.latestParseResult = nextTab.latestParseResult;
+    appState.latestParsedSource = nextTab.latestParsedSource;
+    invalidateParserRequests(appState);
+    setEditorContentSilently(nextTab.content);
+    restoreTabOutput(nextTab);
+  }
+
+  renderFileTabs();
+  scheduleDraftSave();
 }
 
 function validateGrammarFile(file) {
@@ -973,6 +1178,12 @@ function handleKeyboardShortcuts(event) {
   if (modKey && event.shiftKey && event.key.toLowerCase() === 'p') {
     event.preventDefault();
     openCommandPalette();
+    return;
+  }
+
+  if (modKey && event.key.toLowerCase() === 't') {
+    event.preventDefault();
+    createNewEditorTab();
     return;
   }
 
@@ -3495,6 +3706,7 @@ async function handleParse() {
       appState.latestParsedSource = source;
       exportBtn.disabled = false;
       setParseMarkers([]);
+      syncActiveEditorTab();
     } else {
       updateStatus('Parse error', 'error');
       setParseMarkers(result.errors || []);
@@ -3614,6 +3826,7 @@ function handleResetVM() {
   invalidateParserRequests(appState);
   exportBtn.disabled = true;
   setParseMarkers([]);
+  syncActiveEditorTab();
   updateStatus('Ruby Wasm VM reset - it will initialize on the next Parse or Validate', 'ready');
 }
 
@@ -3666,6 +3879,7 @@ function getCommands() {
     { id: 'export', label: 'Export Report', run: handleExport, disabled: exportBtn.disabled },
     { id: 'download', label: 'Download .y', run: handleDownload, disabled: downloadBtn.disabled },
     { id: 'upload', label: 'Upload File', run: handleUpload, disabled: uploadBtn.disabled },
+    { id: 'new-tab', label: 'New Grammar Tab', run: createNewEditorTab, disabled: addFileTabBtn.disabled },
     { id: 'theme', label: 'Toggle Theme', run: toggleTheme },
     { id: 'jump-symbol', label: 'Jump to Symbol', run: jumpToSymbol },
     { id: 'format-selection', label: 'Format Selection', run: formatSelection },
@@ -3718,6 +3932,7 @@ function handleExport() {
     alert('The grammar changed after the last successful parse. Please run Parse again before exporting.');
     clearParseState(appState);
     exportBtn.disabled = true;
+    syncActiveEditorTab();
     return;
   }
 
@@ -3892,6 +4107,7 @@ async function init() {
     listen(parseBtn, 'click', handleParse);
     listen(validateBtn, 'click', handleValidate);
     listen(resetVmBtn, 'click', handleResetVM);
+    listen(addFileTabBtn, 'click', createNewEditorTab);
     listen(presetSelect, 'change', handlePresetSelect);
     listen(uploadBtn, 'click', handleUpload);
     listen(downloadBtn, 'click', handleDownload);
