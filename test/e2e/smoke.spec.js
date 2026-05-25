@@ -52,7 +52,7 @@ test('exports report and grammar downloads', async ({ page }) => {
 
   const reportDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export HTML report' }).click();
-  await expect((await reportDownload).suggestedFilename()).toBe('lrama-report.html');
+  await expect((await reportDownload).suggestedFilename()).toBe('calc-report.html');
 
   const grammarDownload = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Download grammar file' }).click();

@@ -8,6 +8,11 @@ import {
   clearAnalysisOutput,
   setStatus,
 } from './lib/output-view.js';
+import {
+  DEFAULT_DOWNLOAD_FILENAME,
+  reportFileNameForGrammar,
+  sanitizeDownloadFileName,
+} from './lib/file-names.js';
 import { readStorage, writeStorage } from './lib/safe-storage.js';
 import { generateHTMLReport } from './lib/report-export.js';
 import { downloadPNG, downloadSVG } from './lib/svg-export.js';
@@ -116,7 +121,6 @@ let parseRequestId = 0;
 let validateRequestId = 0;
 
 // File and draft state
-const DEFAULT_DOWNLOAD_FILENAME = 'grammar.y';
 const DRAFT_STORAGE_KEY = 'lrama-corral:draft';
 const THEME_STORAGE_KEY = 'lrama-corral:theme';
 const MAX_GRAMMAR_FILE_SIZE = 1024 * 1024;
@@ -430,11 +434,6 @@ function setMobileView(mode) {
   if (mobileViewMode === 'editor') {
     editor?.layout();
   }
-}
-
-function sanitizeDownloadFileName(fileName) {
-  const sanitized = fileName.trim().replace(/[\\/:*?"<>|]+/g, '-');
-  return sanitized || DEFAULT_DOWNLOAD_FILENAME;
 }
 
 function validateGrammarFile(file) {
@@ -3810,7 +3809,7 @@ function handleExport() {
   // Create download link
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'lrama-report.html';
+  a.download = reportFileNameForGrammar(currentFileName);
   document.body.appendChild(a);
   a.click();
 
