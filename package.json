@@ -10,6 +10,7 @@
     "test:e2e": "playwright test",
     "test:ruby": "ruby scripts/test-lrama-bundle.rb",
     "check:public-bundles": "node scripts/check-public-bundles.mjs",
+    "audit:moderate": "npm audit --audit-level=moderate",
     "size:check": "node scripts/check-bundle-size.mjs",
     "preview": "vite preview",
     "build:wasm": "bash scripts/build-wasm.sh"

@@ -19,6 +19,8 @@ jobs:
         run: npm ci
       - name: Unit tests
         run: npm test
+      - name: Dependency audit
+        run: npm run audit:moderate
       - name: Ruby bundle smoke test
         run: npm run test:ruby
       - name: Public bundle provenance
