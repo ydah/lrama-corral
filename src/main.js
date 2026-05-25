@@ -20,6 +20,7 @@ const statusEl = document.getElementById('status');
 const editorContainer = document.getElementById('editor-container');
 const parseBtn = document.getElementById('parseBtn');
 const validateBtn = document.getElementById('validateBtn');
+const resetVmBtn = document.getElementById('resetVmBtn');
 const outputEl = document.getElementById('output');
 const presetSelect = document.getElementById('presetSelect');
 const uploadBtn = document.getElementById('uploadBtn');
@@ -3009,6 +3010,17 @@ async function handleValidate() {
   }
 }
 
+function handleResetVM() {
+  lramaBridge.reset();
+  latestParseResult = null;
+  latestParsedSource = '';
+  parseRequestId += 1;
+  validateRequestId += 1;
+  exportBtn.disabled = true;
+  setParseMarkers([]);
+  updateStatus('Ruby Wasm VM reset - it will initialize on the next Parse or Validate', 'ready');
+}
+
 /**
  * Report export handler
  */
@@ -3437,12 +3449,14 @@ async function init() {
     // Enable buttons
     parseBtn.disabled = false;
     validateBtn.disabled = false;
+    resetVmBtn.disabled = false;
     uploadBtn.disabled = false;
     downloadBtn.disabled = false;
 
     // Set event listeners
     parseBtn.addEventListener('click', handleParse);
     validateBtn.addEventListener('click', handleValidate);
+    resetVmBtn.addEventListener('click', handleResetVM);
     presetSelect.addEventListener('change', handlePresetSelect);
     uploadBtn.addEventListener('click', handleUpload);
     downloadBtn.addEventListener('click', handleDownload);
