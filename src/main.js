@@ -189,6 +189,9 @@ function initMonacoEditor() {
       horizontalScrollbarSize: 10
     }
   });
+  if (activeTab) {
+    activeTab.model = editor.getModel();
+  }
 
   // Update Undo/Redo button state when editor content changes
   appLifecycle.addDisposable(editor.onDidChangeModelContent(() => {
@@ -201,6 +204,9 @@ function initMonacoEditor() {
     syncActiveEditorTab();
   }));
   appLifecycle.add(() => editor?.dispose());
+  appLifecycle.add(() => {
+    appState.editorTabs.forEach(tab => tab.model?.dispose());
+  });
 
   // Update initial button state
   updateUndoRedoButtons();
@@ -339,8 +345,11 @@ function syncActiveEditorTab() {
   tab.isDirty = appState.isDirty;
   tab.latestParseResult = appState.latestParseResult;
   tab.latestParsedSource = appState.latestParsedSource;
-  if (editor) {
+  if (editor && tab.id === appState.activeEditorTabId) {
     tab.content = editor.getValue();
+    tab.viewState = editor.saveViewState();
+  } else if (tab.model) {
+    tab.content = tab.model.getValue();
   }
   renderFileTabs();
 }
@@ -529,17 +538,20 @@ function renderFileTabs() {
   addFileTabBtn.disabled = appState.editorTabs.length >= MAX_EDITOR_TABS;
 }
 
-function setEditorContentSilently(content) {
+function ensureEditorTabModel(tab) {
+  if (!tab.model) {
+    tab.model = monaco.editor.createModel(tab.content, 'yacc');
+  }
+  return tab.model;
+}
+
+function setEditorModelForTab(tab) {
   suppressEditorChange = true;
   try {
-    const model = editor?.getModel();
-    if (model) {
-      model.setValue(content);
-    }
+    editor.setModel(ensureEditorTabModel(tab));
   } finally {
     suppressEditorChange = false;
   }
-  updateUndoRedoButtons();
 }
 
 function restoreTabOutput(tab) {
@@ -570,7 +582,12 @@ function switchEditorTab(tabId) {
   appState.latestParsedSource = targetTab.latestParsedSource;
   invalidateParserRequests(appState);
 
-  setEditorContentSilently(targetTab.content);
+  setEditorModelForTab(targetTab);
+  if (targetTab.viewState) {
+    editor.restoreViewState(targetTab.viewState);
+  }
+  editor.focus();
+  updateUndoRedoButtons();
   restoreTabOutput(targetTab);
   renderFileTabs();
   scheduleDraftSave();
@@ -620,10 +637,16 @@ function closeEditorTab(tabId) {
     appState.latestParseResult = nextTab.latestParseResult;
     appState.latestParsedSource = nextTab.latestParsedSource;
     invalidateParserRequests(appState);
-    setEditorContentSilently(nextTab.content);
+    setEditorModelForTab(nextTab);
+    if (nextTab.viewState) {
+      editor.restoreViewState(nextTab.viewState);
+    }
+    editor.focus();
+    updateUndoRedoButtons();
     restoreTabOutput(nextTab);
   }
 
+  tab.model?.dispose();
   renderFileTabs();
   scheduleDraftSave();
 }
