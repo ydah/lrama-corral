@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test';
 
+const samplePresets = ['calc', 'simple', 'json', 'sql', 'lang', 'precedence', 'prologue'];
+
 const loadCalcSample = async (page) => {
   await page.goto('/');
 
@@ -34,6 +36,20 @@ test('loads a sample grammar and renders parser analysis', async ({ page }) => {
     });
   });
   expect(unsafeSvgAttributes).toEqual([]);
+});
+
+test('parses every bundled sample grammar', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('button', { name: 'Parse grammar' })).toBeEnabled();
+
+  for (const preset of samplePresets) {
+    await page.locator('#presetSelect').selectOption(preset);
+    await expect(page.locator('#status')).toContainText('Sample loaded');
+
+    await page.getByRole('button', { name: 'Parse grammar' }).click();
+    await expect(page.locator('#status')).toContainText('Parse successful', { timeout: 90_000 });
+    await expect(page.getByRole('heading', { name: 'Grammar Structure' })).toBeVisible();
+  }
 });
 
 test('validates a sample grammar', async ({ page }) => {
