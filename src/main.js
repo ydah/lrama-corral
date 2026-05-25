@@ -1,6 +1,12 @@
 import { lramaBridge } from './lib/lrama-bridge.js';
 import './styles.css';
 import { createLifecycle } from './lib/lifecycle.js';
+import {
+  appendError,
+  appendJsonResult,
+  clearAnalysisOutput,
+  setStatus,
+} from './lib/output-view.js';
 import { readStorage, writeStorage } from './lib/safe-storage.js';
 import { generateHTMLReport } from './lib/report-export.js';
 import { downloadPNG, downloadSVG } from './lib/svg-export.js';
@@ -1383,59 +1389,28 @@ function handleKeyboardShortcuts(event) {
  * Update status display
  */
 function updateStatus(message, type = 'loading') {
-  statusEl.textContent = message;
-  statusEl.className = `status ${type}`;
+  setStatus(statusEl, message, type);
 }
 
 /**
  * Clear output area
  */
 function clearOutput() {
-  outputEl.innerHTML = '';
-  addRuleBtn.style.display = 'none';
+  clearAnalysisOutput(outputEl, addRuleBtn);
 }
 
 /**
  * Show error
  */
 function showError(message, location = null) {
-  const errorDiv = document.createElement('div');
-  errorDiv.className = 'error';
-
-  // Display if location information is available
-  if (location && (location.line > 0 || location.column > 0)) {
-    const locationText = location.column > 0
-      ? `Line ${location.line}, Column ${location.column}: `
-      : `Line ${location.line}: `;
-
-    const locationSpan = document.createElement('strong');
-    locationSpan.textContent = locationText;
-    errorDiv.appendChild(locationSpan);
-
-    const messageSpan = document.createElement('span');
-    messageSpan.textContent = message;
-    errorDiv.appendChild(messageSpan);
-  } else {
-    errorDiv.textContent = message;
-  }
-
-  outputEl.appendChild(errorDiv);
+  appendError(outputEl, message, location);
 }
 
 /**
  * Format and display JSON result
  */
 function showResult(title, data) {
-  const titleEl = document.createElement('h3');
-  titleEl.textContent = title;
-  titleEl.style.marginBottom = '10px';
-  titleEl.style.color = '#2c3e50';
-
-  const preEl = document.createElement('pre');
-  preEl.textContent = JSON.stringify(data, null, 2);
-
-  outputEl.appendChild(titleEl);
-  outputEl.appendChild(preEl);
+  appendJsonResult(outputEl, title, data);
 }
 
 /**
