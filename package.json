@@ -8,6 +8,8 @@
     "build": "vite build",
     "test": "node --test",
     "test:ruby": "ruby scripts/test-lrama-bundle.rb",
+    "check:public-bundles": "node scripts/check-public-bundles.mjs",
+    "size:check": "node scripts/check-bundle-size.mjs",
     "preview": "vite preview",
     "build:wasm": "bash scripts/build-wasm.sh"
   },

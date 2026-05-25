@@ -21,7 +21,11 @@ jobs:
         run: npm test
       - name: Ruby bundle smoke test
         run: npm run test:ruby
+      - name: Public bundle provenance
+        run: npm run check:public-bundles
       - name: Build
         run: npm run build
         env:
           NODE_ENV: production
+      - name: Bundle size budget
+        run: npm run size:check

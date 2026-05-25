@@ -173,7 +173,7 @@ module LramaAPI
         # Extract Follow sets
         states.follow_sets.each do |(state_id, nterm_token_id), terms|
           # Get nonterminal from nterm_token_id
-          nterm = grammar.find_symbol_by_token_id(nterm_token_id)
+          nterm = grammar.nterms.find { |candidate| candidate.token_id == nterm_token_id }
           next unless nterm
 
           name = nterm.id.s_value
@@ -334,17 +334,21 @@ module LramaAPI
       }
     end
 
+    def internal_symbol_name?(name)
+      name.start_with?('$') || name.start_with?('YY')
+    end
+
     def analyze_grammar_lint(tokens, nonterminals, rules, start_sym)
-      token_names = tokens.map { |token| token[:name] }.reject { |name| name.start_with?('$') }
+      token_names = tokens.map { |token| token[:name] }.reject { |name| internal_symbol_name?(name) }
       declared_nonterminals = nonterminals.map { |nterm| nterm[:name] }.to_set
-      lhs_names = rules.map { |rule| rule[:lhs] }.reject { |name| name.start_with?('$') }.to_set
-      rhs_symbols = rules.flat_map { |rule| rule[:rhs].map { |sym| sym[:symbol] } }.reject { |name| name.start_with?('$') }
+      lhs_names = rules.map { |rule| rule[:lhs] }.reject { |name| internal_symbol_name?(name) }.to_set
+      rhs_symbols = rules.flat_map { |rule| rule[:rhs].map { |sym| sym[:symbol] } }.reject { |name| internal_symbol_name?(name) }
       rhs_token_names = rules.flat_map { |rule|
         rule[:rhs].select { |sym| sym[:type] == 'terminal' }.map { |sym| sym[:symbol] }
-      }.reject { |name| name.start_with?('$') }.to_set
+      }.reject { |name| internal_symbol_name?(name) }.to_set
       rhs_nonterm_names = rules.flat_map { |rule|
         rule[:rhs].select { |sym| sym[:type] == 'nonterminal' }.map { |sym| sym[:symbol] }
-      }.reject { |name| name.start_with?('$') }.to_set
+      }.reject { |name| internal_symbol_name?(name) }.to_set
 
       undefined_symbols = rhs_symbols
         .reject { |name| token_names.include?(name) || lhs_names.include?(name) || name == 'error' }
@@ -365,8 +369,8 @@ module LramaAPI
         unreachable_nonterminals: unreachable_nonterminals,
         unused_rules: unused_rules,
         non_productive_nonterminals: non_productive_nonterminals.sort,
-        referenced_nonterminals_without_rules: (rhs_nonterm_names - lhs_names).to_a.sort,
-        declared_nonterminals_without_rules: (declared_nonterminals - lhs_names).to_a.sort
+        referenced_nonterminals_without_rules: rhs_nonterm_names.reject { |name| lhs_names.include?(name) }.sort,
+        declared_nonterminals_without_rules: declared_nonterminals.reject { |name| lhs_names.include?(name) }.sort
       }
     end
 
@@ -397,7 +401,7 @@ module LramaAPI
     end
 
     def compute_non_productive_nonterminals(rules, token_names)
-      lhs_names = rules.map { |rule| rule[:lhs] }.reject { |name| name.start_with?('$') }.to_set
+      lhs_names = rules.map { |rule| rule[:lhs] }.reject { |name| internal_symbol_name?(name) }.to_set
       productive = Set.new
 
       loop do
@@ -420,7 +424,7 @@ module LramaAPI
         break unless changed
       end
 
-      (lhs_names - productive).to_a
+      lhs_names.reject { |name| productive.include?(name) }
     end
 
     def extract_tokens(grammar)
@@ -558,27 +562,31 @@ module LramaAPI
       conflicts = []
 
       # Extract Shift transitions
-      state.shifts.each do |sym, next_state_id|
+      state.term_transitions.each do |shift, next_state|
         shifts << {
-          symbol: sym.id.s_value,
-          to_state: next_state_id
+          symbol: shift.next_sym.id.s_value,
+          to_state: next_state.id
         }
-      end if state.respond_to?(:shifts) && state.shifts
+      end if state.respond_to?(:term_transitions) && state.term_transitions
 
       # Extract Goto transitions (nonterminal transitions)
-      state.gotos.each do |sym, next_state_id|
+      state.nterm_transitions.each do |shift, next_state|
         gotos << {
-          symbol: sym.id.s_value,
-          to_state: next_state_id
+          symbol: shift.next_sym.id.s_value,
+          to_state: next_state.id
         }
-      end if state.respond_to?(:gotos) && state.gotos
+      end if state.respond_to?(:nterm_transitions) && state.nterm_transitions
 
       # Extract Reduce actions
-      state.reduces.each do |sym, reduce_action|
-        reduces << {
-          symbol: sym.id.s_value,
-          rule_id: reduce_action.item.rule.id
-        }
+      state.reduces.each do |reduce_action|
+        lookaheads = reduce_action.selected_look_ahead
+        lookaheads = [nil] if lookaheads.empty?
+        lookaheads.each do |sym|
+          reduces << {
+            symbol: sym ? sym.id.s_value : '$default',
+            rule_id: reduce_action.item.rule.id
+          }
+        end
       end if state.respond_to?(:reduces) && state.reduces
 
       # Extract state items

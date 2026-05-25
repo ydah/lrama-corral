@@ -105,10 +105,32 @@ const DRAFT_STORAGE_KEY = 'lrama-corral:draft';
 const THEME_STORAGE_KEY = 'lrama-corral:theme';
 const MAX_GRAMMAR_FILE_SIZE = 1024 * 1024;
 const AUTO_PARSE_DELAY_MS = 700;
+const GRAPH_ZOOM_STEP = 0.15;
+const GRAPH_MIN_ZOOM = 0.35;
+const GRAPH_MAX_ZOOM = 2.5;
+const SVG_EXPORT_STYLE_PROPS = [
+  'fill',
+  'stroke',
+  'stroke-width',
+  'color',
+  'font-family',
+  'font-size',
+  'font-weight',
+  'text-anchor',
+  'dominant-baseline',
+];
+const STATE_GRAPH_COLORS = {
+  state: '#3498db',
+  conflict: '#e74c3c',
+  shift: '#2ecc71',
+  goto: '#3498db',
+  reduce: '#f39c12',
+};
 let currentFileName = DEFAULT_DOWNLOAD_FILENAME;
 let isDirty = false;
 let draftSaveTimer = null;
 let autoParseTimer = null;
+let svgIdCounter = 0;
 
 /**
  * Yacc/Bison language definition for Monaco Editor
@@ -1360,13 +1382,14 @@ function showResult(title, data) {
 /**
  * Display structured parse result
  */
-function showStructuredResult(data) {
+function showStructuredResult(data, previousResult = null) {
   if (!data.success || !data.grammar) {
     showResult('Parse Result', data);
     return;
   }
 
   const grammar = data.grammar;
+  const previousGrammar = previousResult?.grammar || null;
 
   // Title
   const titleEl = document.createElement('h3');
@@ -1446,8 +1469,20 @@ function showStructuredResult(data) {
 
   // Display First/Follow sets
   if (grammar.first_sets && grammar.follow_sets) {
-    const firstFollowSection = createFirstFollowSection(grammar.first_sets, grammar.follow_sets);
+    const firstFollowSection = createFirstFollowSection(
+      grammar.first_sets,
+      grammar.follow_sets,
+      previousGrammar?.first_sets,
+      previousGrammar?.follow_sets
+    );
     outputEl.appendChild(firstFollowSection);
+  }
+
+  if (grammar.rules && grammar.rules.length > 0) {
+    const dependencySection = createDependencyGraphSection(grammar.rules);
+    if (dependencySection) {
+      outputEl.appendChild(dependencySection);
+    }
   }
 
   // Display State Transition Diagram
@@ -1782,7 +1817,7 @@ function createConflictsSection(conflicts) {
 /**
  * Create First/Follow set section
  */
-function createFirstFollowSection(firstSets, followSets) {
+function createFirstFollowSection(firstSets, followSets, previousFirstSets = null, previousFollowSets = null) {
   const section = document.createElement('div');
   section.style.marginBottom = '25px';
 
@@ -1801,6 +1836,8 @@ function createFirstFollowSection(firstSets, followSets) {
   descEl.style.fontSize = '13px';
   descEl.style.marginBottom = '15px';
   section.appendChild(descEl);
+
+  section.appendChild(createFirstFollowTable(firstSets, followSets, previousFirstSets, previousFollowSets));
 
   // Grid container
   const gridContainer = document.createElement('div');
@@ -1943,6 +1980,315 @@ function createFirstFollowSection(firstSets, followSets) {
 
   section.appendChild(gridContainer);
   return section;
+}
+
+function createFirstFollowTable(firstSets, followSets, previousFirstSets = null, previousFollowSets = null) {
+  const tableWrap = document.createElement('div');
+  tableWrap.style.overflowX = 'auto';
+  tableWrap.style.marginBottom = '18px';
+
+  const table = document.createElement('table');
+  table.style.width = '100%';
+  table.style.borderCollapse = 'collapse';
+  table.style.background = 'var(--bg-secondary)';
+  table.style.border = '1px solid var(--border-color)';
+
+  const headers = ['Symbol', 'FIRST', 'FOLLOW', 'Change'];
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  headerRow.style.background = 'var(--btn-primary)';
+  headerRow.style.color = 'white';
+  headers.forEach(header => {
+    const th = document.createElement('th');
+    th.textContent = header;
+    th.style.padding = '8px 10px';
+    th.style.textAlign = 'left';
+    th.style.fontSize = '12px';
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  const symbols = [...new Set([...Object.keys(firstSets), ...Object.keys(followSets)])].sort();
+  symbols.forEach((symbol, index) => {
+    const row = document.createElement('tr');
+    row.style.background = index % 2 === 0 ? 'var(--bg-primary)' : 'var(--bg-secondary)';
+
+    [
+      symbol,
+      formatSetList(firstSets[symbol] || []),
+      formatSetList(followSets[symbol] || []),
+      formatFirstFollowDiff(
+        firstSets[symbol] || [],
+        followSets[symbol] || [],
+        previousFirstSets?.[symbol],
+        previousFollowSets?.[symbol]
+      ),
+    ].forEach(value => {
+      const td = document.createElement('td');
+      td.textContent = value;
+      td.style.padding = '7px 10px';
+      td.style.borderBottom = '1px solid var(--border-color)';
+      td.style.fontSize = '12px';
+      td.style.color = 'var(--text-primary)';
+      td.style.fontFamily = value === symbol ? "'Courier New', monospace" : '';
+      row.appendChild(td);
+    });
+
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+  tableWrap.appendChild(table);
+  return tableWrap;
+}
+
+function formatSetList(values) {
+  return values.length > 0 ? values.join(', ') : '(empty)';
+}
+
+function formatSetChange(current = [], previous = []) {
+  if (!previous) return '';
+
+  const currentSet = new Set(current);
+  const previousSet = new Set(previous);
+  const added = current.filter(value => !previousSet.has(value));
+  const removed = previous.filter(value => !currentSet.has(value));
+  return [
+    ...added.map(value => `+${value}`),
+    ...removed.map(value => `-${value}`),
+  ].join(' ');
+}
+
+function formatFirstFollowDiff(first, follow, previousFirst, previousFollow) {
+  if (!previousFirst && !previousFollow) return 'Initial';
+
+  const firstChange = formatSetChange(first, previousFirst || []);
+  const followChange = formatSetChange(follow, previousFollow || []);
+  const parts = [];
+  if (firstChange) parts.push(`FIRST ${firstChange}`);
+  if (followChange) parts.push(`FOLLOW ${followChange}`);
+  return parts.length > 0 ? parts.join(' | ') : 'No change';
+}
+
+function createDependencyGraphSection(rules) {
+  const nonterminals = [...new Set(rules
+    .map(rule => rule.lhs)
+    .filter(name => name && !name.startsWith('$')))].sort();
+
+  if (nonterminals.length === 0) return null;
+
+  const nonterminalSet = new Set(nonterminals);
+  const ruleLineByLhs = new Map();
+  rules.forEach(rule => {
+    if (rule.line_number && !ruleLineByLhs.has(rule.lhs)) {
+      ruleLineByLhs.set(rule.lhs, rule.line_number);
+    }
+  });
+
+  const edgeKeys = new Set();
+  const edges = [];
+  rules.forEach(rule => {
+    if (!nonterminalSet.has(rule.lhs)) return;
+
+    (rule.rhs || []).forEach(symbol => {
+      if (symbol.type !== 'nonterminal') return;
+      if (!nonterminalSet.has(symbol.symbol)) return;
+
+      const key = `${rule.lhs}\u0000${symbol.symbol}`;
+      if (edgeKeys.has(key)) return;
+
+      edgeKeys.add(key);
+      edges.push({ from: rule.lhs, to: symbol.symbol });
+    });
+  });
+
+  const section = document.createElement('div');
+  section.style.marginBottom = '25px';
+
+  const titleEl = document.createElement('h4');
+  titleEl.textContent = `Nonterminal Dependency Graph (${nonterminals.length})`;
+  titleEl.style.color = 'var(--text-primary)';
+  titleEl.style.marginBottom = '10px';
+  titleEl.style.fontSize = '16px';
+  section.appendChild(titleEl);
+
+  const descEl = document.createElement('p');
+  descEl.textContent = 'Rule-to-rule dependencies derived from nonterminals used on RHS.';
+  descEl.style.color = 'var(--text-secondary)';
+  descEl.style.fontSize = '13px';
+  descEl.style.marginBottom = '15px';
+  section.appendChild(descEl);
+
+  const graphWrap = document.createElement('div');
+  graphWrap.style.background = 'var(--bg-secondary)';
+  graphWrap.style.border = '1px solid var(--border-color)';
+  graphWrap.style.borderRadius = '6px';
+  graphWrap.style.padding = '16px';
+  graphWrap.style.overflow = 'auto';
+
+  const svg = createDependencyGraph(nonterminals, edges, ruleLineByLhs);
+  graphWrap.appendChild(svg);
+  section.appendChild(graphWrap);
+
+  if (edges.length > 0) {
+    const list = document.createElement('details');
+    list.style.marginTop = '10px';
+    const summary = document.createElement('summary');
+    summary.textContent = `Dependency edges (${edges.length})`;
+    summary.style.cursor = 'pointer';
+    summary.style.color = 'var(--btn-primary)';
+    summary.style.fontWeight = 'bold';
+    list.appendChild(summary);
+
+    const edgeText = document.createElement('pre');
+    edgeText.textContent = edges.map(edge => `${edge.from} -> ${edge.to}`).join('\n');
+    edgeText.style.marginTop = '8px';
+    edgeText.style.fontSize = '12px';
+    list.appendChild(edgeText);
+    section.appendChild(list);
+  }
+
+  return section;
+}
+
+function createDependencyGraph(nonterminals, edges, ruleLineByLhs) {
+  const width = 900;
+  const height = Math.max(320, Math.min(900, 240 + nonterminals.length * 24));
+  const centerX = width / 2;
+  const centerY = height / 2;
+  const radius = nonterminals.length === 1 ? 0 : Math.min(width, height) / 2 - 70;
+  const nodeRadius = 22;
+  const markerId = `dependency-arrowhead-${svgIdCounter++}`;
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width', width);
+  svg.setAttribute('height', height);
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  svg.style.background = 'var(--bg-primary)';
+  svg.style.border = '1px solid var(--border-color)';
+  svg.style.borderRadius = '4px';
+
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.appendChild(createArrowMarker(markerId, '#7f8c8d'));
+  svg.appendChild(defs);
+
+  const positions = {};
+  nonterminals.forEach((name, index) => {
+    const angle = nonterminals.length === 1
+      ? 0
+      : (Math.PI * 2 * index) / nonterminals.length - Math.PI / 2;
+    positions[name] = {
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius,
+    };
+  });
+
+  edges.slice(0, 120).forEach(edge => {
+    const from = positions[edge.from];
+    const to = positions[edge.to];
+    if (!from || !to) return;
+    drawDependencyEdge(svg, from, to, edge.from === edge.to, nodeRadius, markerId);
+  });
+
+  nonterminals.forEach(name => {
+    const pos = positions[name];
+    const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+    group.setAttribute('tabindex', '0');
+    group.setAttribute('role', 'button');
+    group.setAttribute('aria-label', `Jump to ${name}`);
+    group.style.cursor = ruleLineByLhs.has(name) ? 'pointer' : 'default';
+
+    if (ruleLineByLhs.has(name)) {
+      const jump = () => jumpToLine(ruleLineByLhs.get(name));
+      group.addEventListener('click', jump);
+      group.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        jump();
+      });
+    }
+
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', pos.x);
+    circle.setAttribute('cy', pos.y);
+    circle.setAttribute('r', nodeRadius);
+    circle.setAttribute('fill', 'var(--btn-primary)');
+    circle.setAttribute('stroke', 'var(--text-primary)');
+    circle.setAttribute('stroke-width', '2');
+    group.appendChild(circle);
+
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('x', pos.x);
+    label.setAttribute('y', pos.y + nodeRadius + 16);
+    label.setAttribute('font-size', '12');
+    label.setAttribute('fill', 'var(--text-primary)');
+    label.setAttribute('text-anchor', 'middle');
+    label.textContent = name;
+    group.appendChild(label);
+
+    const shortLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    shortLabel.setAttribute('x', pos.x);
+    shortLabel.setAttribute('y', pos.y + 4);
+    shortLabel.setAttribute('font-size', '12');
+    shortLabel.setAttribute('font-weight', 'bold');
+    shortLabel.setAttribute('fill', 'white');
+    shortLabel.setAttribute('text-anchor', 'middle');
+    shortLabel.textContent = String(nonterminals.indexOf(name) + 1);
+    group.appendChild(shortLabel);
+
+    svg.appendChild(group);
+  });
+
+  if (edges.length > 120) {
+    const warning = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    warning.setAttribute('x', 20);
+    warning.setAttribute('y', height - 20);
+    warning.setAttribute('font-size', '12');
+    warning.setAttribute('fill', 'var(--status-loading-text)');
+    warning.textContent = `Showing first 120 of ${edges.length} dependency edges.`;
+    svg.appendChild(warning);
+  }
+
+  return svg;
+}
+
+function drawDependencyEdge(svg, from, to, isSelfLoop, nodeRadius, markerId) {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+
+  if (isSelfLoop) {
+    const loopSize = 34;
+    path.setAttribute(
+      'd',
+      `M ${from.x + nodeRadius} ${from.y} C ${from.x + loopSize} ${from.y - loopSize}, ${from.x - loopSize} ${from.y - loopSize}, ${from.x - nodeRadius} ${from.y}`
+    );
+  } else {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const angle = Math.atan2(dy, dx);
+    const startX = from.x + Math.cos(angle) * nodeRadius;
+    const startY = from.y + Math.sin(angle) * nodeRadius;
+    const endX = to.x - Math.cos(angle) * (nodeRadius + 8);
+    const endY = to.y - Math.sin(angle) * (nodeRadius + 8);
+    const midX = (startX + endX) / 2;
+    const midY = (startY + endY) / 2;
+    path.setAttribute('d', `M ${startX} ${startY} Q ${midX - dy / 12} ${midY + dx / 12} ${endX} ${endY}`);
+  }
+
+  path.setAttribute('stroke', '#7f8c8d');
+  path.setAttribute('stroke-width', '1.5');
+  path.setAttribute('fill', 'none');
+  path.setAttribute('opacity', '0.7');
+  path.setAttribute('marker-end', `url(#${markerId})`);
+  svg.appendChild(path);
+}
+
+function jumpToLine(lineNumber) {
+  if (!editor || !lineNumber) return;
+  editor.setPosition({ lineNumber, column: 1 });
+  editor.revealLineInCenter(lineNumber);
+  editor.focus();
 }
 
 /**
@@ -2256,34 +2602,105 @@ function createStateTransitionSection(stateTransitions) {
   graphContainer.style.border = '1px solid var(--border-color)';
   graphContainer.style.borderRadius = '6px';
   graphContainer.style.padding = '20px';
-  graphContainer.style.overflow = 'auto';
+  graphContainer.style.overflow = 'hidden';
   graphContainer.style.position = 'relative';
 
-  // Export buttons
-  const exportDiv = document.createElement('div');
-  exportDiv.style.marginBottom = '15px';
-  exportDiv.style.display = 'flex';
-  exportDiv.style.gap = '8px';
+  const toolbar = document.createElement('div');
+  toolbar.style.marginBottom = '15px';
+  toolbar.style.display = 'flex';
+  toolbar.style.flexWrap = 'wrap';
+  toolbar.style.alignItems = 'center';
+  toolbar.style.gap = '8px';
 
   const svgExportBtn = document.createElement('button');
-  svgExportBtn.textContent = '💾 Export SVG';
+  svgExportBtn.textContent = 'Export SVG';
   svgExportBtn.className = 'secondary';
   svgExportBtn.style.padding = '6px 12px';
   svgExportBtn.style.fontSize = '12px';
-  exportDiv.appendChild(svgExportBtn);
+  toolbar.appendChild(svgExportBtn);
 
   const pngExportBtn = document.createElement('button');
-  pngExportBtn.textContent = '🖼️ Export PNG';
+  pngExportBtn.textContent = 'Export PNG';
   pngExportBtn.className = 'secondary';
   pngExportBtn.style.padding = '6px 12px';
   pngExportBtn.style.fontSize = '12px';
-  exportDiv.appendChild(pngExportBtn);
+  toolbar.appendChild(pngExportBtn);
 
-  graphContainer.appendChild(exportDiv);
+  const zoomOutBtn = document.createElement('button');
+  zoomOutBtn.textContent = 'Zoom Out';
+  zoomOutBtn.className = 'secondary';
+  zoomOutBtn.style.padding = '6px 12px';
+  zoomOutBtn.style.fontSize = '12px';
+  toolbar.appendChild(zoomOutBtn);
 
-  // Generate SVG graph
-  const svg = createStateTransitionGraph(stateTransitions);
-  graphContainer.appendChild(svg);
+  const zoomInBtn = document.createElement('button');
+  zoomInBtn.textContent = 'Zoom In';
+  zoomInBtn.className = 'secondary';
+  zoomInBtn.style.padding = '6px 12px';
+  zoomInBtn.style.fontSize = '12px';
+  toolbar.appendChild(zoomInBtn);
+
+  const fitBtn = document.createElement('button');
+  fitBtn.textContent = 'Fit';
+  fitBtn.className = 'secondary';
+  fitBtn.style.padding = '6px 12px';
+  fitBtn.style.fontSize = '12px';
+  toolbar.appendChild(fitBtn);
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.placeholder = 'Search states, symbols, rules, conflicts';
+  searchInput.setAttribute('aria-label', 'Search states');
+  searchInput.style.flex = '1 1 260px';
+  searchInput.style.minWidth = '220px';
+  searchInput.style.padding = '6px 10px';
+  searchInput.style.border = '1px solid var(--border-color)';
+  searchInput.style.borderRadius = '4px';
+  searchInput.style.background = 'var(--bg-primary)';
+  searchInput.style.color = 'var(--text-primary)';
+  toolbar.appendChild(searchInput);
+
+  const matchCount = document.createElement('span');
+  matchCount.style.fontSize = '12px';
+  matchCount.style.color = 'var(--text-secondary)';
+  toolbar.appendChild(matchCount);
+
+  graphContainer.appendChild(toolbar);
+
+  const viewport = document.createElement('div');
+  viewport.style.overflow = 'auto';
+  viewport.style.maxHeight = '70vh';
+  viewport.style.border = '1px solid var(--border-color)';
+  viewport.style.borderRadius = '4px';
+  viewport.style.background = 'var(--bg-primary)';
+
+  const openStateDetails = (stateId) => {
+    const detail = section.querySelector(`[data-state-detail-id="${stateId}"]`);
+    if (!detail) return;
+    detail.open = true;
+    detail.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const svg = createStateTransitionGraph(stateTransitions, { onStateClick: openStateDetails });
+  viewport.appendChild(svg);
+  graphContainer.appendChild(viewport);
+
+  let zoom = 1;
+  const baseWidth = Number(svg.getAttribute('width')) || 1200;
+  const baseHeight = Number(svg.getAttribute('height')) || 600;
+  const setZoom = (nextZoom) => {
+    zoom = Math.min(GRAPH_MAX_ZOOM, Math.max(GRAPH_MIN_ZOOM, nextZoom));
+    svg.style.width = `${baseWidth * zoom}px`;
+    svg.style.height = `${baseHeight * zoom}px`;
+  };
+
+  zoomOutBtn.addEventListener('click', () => setZoom(zoom - GRAPH_ZOOM_STEP));
+  zoomInBtn.addEventListener('click', () => setZoom(zoom + GRAPH_ZOOM_STEP));
+  fitBtn.addEventListener('click', () => {
+    const viewportWidth = Math.max(1, viewport.clientWidth - 16);
+    const viewportHeight = Math.max(1, viewport.clientHeight - 16);
+    setZoom(Math.min(viewportWidth / baseWidth, viewportHeight / baseHeight, 1));
+  });
 
   // Export button event listeners
   svgExportBtn.addEventListener('click', () => {
@@ -2302,17 +2719,31 @@ function createStateTransitionSection(stateTransitions) {
   const detailsSection = createStateDetailsTable(stateTransitions);
   section.appendChild(detailsSection);
 
+  const applySearch = () => {
+    const query = searchInput.value;
+    const matches = applyStateSearch(svg, stateTransitions, query);
+    filterStateDetailCards(detailsSection, query);
+    matchCount.textContent = query.trim()
+      ? `${matches} matching states`
+      : '';
+  };
+  searchInput.addEventListener('input', applySearch);
+  applySearch();
+
+  const parseTableSection = createParseTableSection(stateTransitions);
+  section.appendChild(parseTableSection);
+
   return section;
 }
 
 /**
  * Create SVG for state transition graph
  */
-function createStateTransitionGraph(stateTransitions) {
+function createStateTransitionGraph(stateTransitions, options = {}) {
   const width = 1200;
   const height = Math.max(600, stateTransitions.length * 80);
   const nodeRadius = 30;
-  const levelWidth = 200;
+  const markerId = `state-arrowhead-${svgIdCounter++}`;
 
   // Create SVG element
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -2328,22 +2759,11 @@ function createStateTransitionGraph(stateTransitions) {
 
   // Arrow marker definition
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-  const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
-  marker.setAttribute('id', 'arrowhead');
-  marker.setAttribute('markerWidth', '10');
-  marker.setAttribute('markerHeight', '10');
-  marker.setAttribute('refX', '9');
-  marker.setAttribute('refY', '3');
-  marker.setAttribute('orient', 'auto');
-  const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-  polygon.setAttribute('points', '0 0, 10 3, 0 6');
-  polygon.setAttribute('fill', '#666');
-  marker.appendChild(polygon);
-  defs.appendChild(marker);
+  defs.appendChild(createArrowMarker(markerId, '#666'));
   svg.appendChild(defs);
 
   // Draw edges (transitions)
-  stateTransitions.forEach((state, index) => {
+  stateTransitions.forEach((state) => {
     const fromPos = positions[state.id];
     if (!fromPos) return;
 
@@ -2351,7 +2771,7 @@ function createStateTransitionGraph(stateTransitions) {
     state.shifts.forEach(shift => {
       const toPos = positions[shift.to_state];
       if (toPos) {
-        drawEdge(svg, fromPos, toPos, shift.symbol, '#2ecc71', nodeRadius);
+        drawEdge(svg, fromPos, toPos, shift.symbol, STATE_GRAPH_COLORS.shift, nodeRadius, markerId);
       }
     });
 
@@ -2359,21 +2779,81 @@ function createStateTransitionGraph(stateTransitions) {
     state.gotos.forEach(goto => {
       const toPos = positions[goto.to_state];
       if (toPos) {
-        drawEdge(svg, fromPos, toPos, goto.symbol, '#3498db', nodeRadius);
+        drawEdge(svg, fromPos, toPos, goto.symbol, STATE_GRAPH_COLORS.goto, nodeRadius, markerId);
       }
     });
   });
 
   // Draw nodes (states)
-  stateTransitions.forEach((state, index) => {
+  stateTransitions.forEach((state) => {
     const pos = positions[state.id];
     if (!pos) return;
 
     const hasConflict = state.error || (state.conflicts && state.conflicts.length > 0);
-    drawStateNode(svg, pos, state.id, hasConflict, nodeRadius);
+    drawStateNode(svg, pos, state.id, hasConflict, nodeRadius, options.onStateClick);
   });
 
+  addStateGraphLegend(svg, width);
+
   return svg;
+}
+
+function createArrowMarker(markerId, color) {
+  const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+  marker.setAttribute('id', markerId);
+  marker.setAttribute('markerWidth', '10');
+  marker.setAttribute('markerHeight', '10');
+  marker.setAttribute('refX', '9');
+  marker.setAttribute('refY', '3');
+  marker.setAttribute('orient', 'auto');
+
+  const polygon = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+  polygon.setAttribute('points', '0 0, 10 3, 0 6');
+  polygon.setAttribute('fill', color);
+  marker.appendChild(polygon);
+  return marker;
+}
+
+function addStateGraphLegend(svg, width) {
+  const legend = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  legend.setAttribute('aria-label', 'State transition legend');
+  const x = width - 210;
+  const y = 18;
+
+  const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  bg.setAttribute('x', x - 12);
+  bg.setAttribute('y', y - 12);
+  bg.setAttribute('width', '194');
+  bg.setAttribute('height', '106');
+  bg.setAttribute('rx', '4');
+  bg.setAttribute('fill', 'var(--bg-secondary)');
+  bg.setAttribute('stroke', 'var(--border-color)');
+  legend.appendChild(bg);
+
+  [
+    ['State', STATE_GRAPH_COLORS.state],
+    ['Conflict', STATE_GRAPH_COLORS.conflict],
+    ['Shift edge', STATE_GRAPH_COLORS.shift],
+    ['Goto edge', STATE_GRAPH_COLORS.goto],
+  ].forEach(([label, color], index) => {
+    const itemY = y + index * 24;
+    const swatch = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    swatch.setAttribute('cx', x);
+    swatch.setAttribute('cy', itemY);
+    swatch.setAttribute('r', '6');
+    swatch.setAttribute('fill', color);
+    legend.appendChild(swatch);
+
+    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    text.setAttribute('x', x + 14);
+    text.setAttribute('y', itemY + 4);
+    text.setAttribute('font-size', '12');
+    text.setAttribute('fill', 'var(--text-primary)');
+    text.textContent = label;
+    legend.appendChild(text);
+  });
+
+  svg.appendChild(legend);
 }
 
 /**
@@ -2445,7 +2925,7 @@ function calculateStatePositions(stateTransitions, width, height, nodeRadius) {
 /**
  * Draw edge (transition)
  */
-function drawEdge(svg, fromPos, toPos, label, color, nodeRadius) {
+function drawEdge(svg, fromPos, toPos, label, color, nodeRadius, markerId) {
   const dx = toPos.x - fromPos.x;
   const dy = toPos.y - fromPos.y;
   const angle = Math.atan2(dy, dx);
@@ -2470,7 +2950,7 @@ function drawEdge(svg, fromPos, toPos, label, color, nodeRadius) {
   path.setAttribute('stroke', color);
   path.setAttribute('stroke-width', '2');
   path.setAttribute('fill', 'none');
-  path.setAttribute('marker-end', 'url(#arrowhead)');
+  path.setAttribute('marker-end', `url(#${markerId})`);
   svg.appendChild(path);
 
   // Draw label
@@ -2487,16 +2967,37 @@ function drawEdge(svg, fromPos, toPos, label, color, nodeRadius) {
 /**
  * Draw state node
  */
-function drawStateNode(svg, pos, stateId, hasConflict, radius) {
+function drawStateNode(svg, pos, stateId, hasConflict, radius, onStateClick = null) {
+  const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+  group.setAttribute('data-state-id', String(stateId));
+  group.setAttribute('tabindex', '0');
+  group.setAttribute('role', 'button');
+  group.setAttribute('aria-label', `Open state ${stateId} details`);
+  group.style.cursor = 'pointer';
+
+  const openDetails = () => {
+    if (onStateClick) onStateClick(stateId);
+  };
+  group.addEventListener('click', openDetails);
+  group.addEventListener('keydown', event => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    openDetails();
+  });
+
+  const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+  title.textContent = hasConflict ? `State ${stateId} has conflicts` : `State ${stateId}`;
+  group.appendChild(title);
+
   // Draw circle
   const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
   circle.setAttribute('cx', pos.x);
   circle.setAttribute('cy', pos.y);
   circle.setAttribute('r', radius);
-  circle.setAttribute('fill', hasConflict ? '#e74c3c' : '#3498db');
+  circle.setAttribute('fill', hasConflict ? STATE_GRAPH_COLORS.conflict : STATE_GRAPH_COLORS.state);
   circle.setAttribute('stroke', '#2c3e50');
   circle.setAttribute('stroke-width', '2');
-  svg.appendChild(circle);
+  group.appendChild(circle);
 
   // Draw text
   const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
@@ -2506,8 +3007,61 @@ function drawStateNode(svg, pos, stateId, hasConflict, radius) {
   text.setAttribute('font-weight', 'bold');
   text.setAttribute('fill', 'white');
   text.setAttribute('text-anchor', 'middle');
+  text.setAttribute('pointer-events', 'none');
   text.textContent = stateId;
-  svg.appendChild(text);
+  group.appendChild(text);
+
+  svg.appendChild(group);
+}
+
+function matchesStateQuery(state, query) {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+
+  const haystack = [
+    `state ${state.id}`,
+    String(state.id),
+    state.error ? 'error conflict' : '',
+    ...(state.items || []).map(item => `rule ${item.rule_id} ${item.display || ''}`),
+    ...(state.shifts || []).map(shift => `shift ${shift.symbol} ${shift.to_state}`),
+    ...(state.gotos || []).map(goto => `goto ${goto.symbol} ${goto.to_state}`),
+    ...(state.reduces || []).map(reduce => `reduce ${reduce.symbol} rule ${reduce.rule_id}`),
+    ...(state.conflicts || []).map(conflict => `conflict ${conflict.type} ${(conflict.tokens || []).join(' ')}`),
+  ].join(' ').toLowerCase();
+
+  return haystack.includes(normalized);
+}
+
+function applyStateSearch(svg, stateTransitions, query) {
+  const queryText = query.trim();
+  let matches = 0;
+
+  stateTransitions.forEach(state => {
+    const isMatch = matchesStateQuery(state, queryText);
+    const node = svg.querySelector(`[data-state-id="${state.id}"]`);
+    if (!node) return;
+
+    if (isMatch) matches += 1;
+    node.style.opacity = queryText && !isMatch ? '0.18' : '1';
+    const circle = node.querySelector('circle');
+    if (circle) {
+      circle.setAttribute('stroke', queryText && isMatch ? '#f1c40f' : '#2c3e50');
+      circle.setAttribute('stroke-width', queryText && isMatch ? '4' : '2');
+    }
+  });
+
+  return queryText ? matches : stateTransitions.length;
+}
+
+function filterStateDetailCards(detailsSection, query) {
+  const queryText = query.trim();
+  detailsSection.querySelectorAll('[data-state-detail-id]').forEach(card => {
+    const state = card._stateTransition;
+    if (!state) return;
+    const isMatch = matchesStateQuery(state, queryText);
+    card.style.display = isMatch ? '' : 'none';
+    if (queryText && isMatch) card.open = true;
+  });
 }
 
 /**
@@ -2517,123 +3071,238 @@ function createStateDetailsTable(stateTransitions) {
   const section = document.createElement('div');
   section.style.marginTop = '20px';
 
+  const header = document.createElement('div');
+  header.style.display = 'flex';
+  header.style.justifyContent = 'space-between';
+  header.style.alignItems = 'center';
+  header.style.gap = '10px';
+  header.style.marginBottom = '10px';
+
   const titleEl = document.createElement('h5');
   titleEl.textContent = 'State Details';
-  titleEl.style.color = '#34495e';
-  titleEl.style.marginBottom = '10px';
+  titleEl.style.color = 'var(--text-primary)';
   titleEl.style.fontSize = '14px';
-  section.appendChild(titleEl);
+  titleEl.style.margin = '0';
+  header.appendChild(titleEl);
+
+  const actions = document.createElement('div');
+  actions.style.display = 'flex';
+  actions.style.gap = '8px';
+
+  const expandAllBtn = document.createElement('button');
+  expandAllBtn.type = 'button';
+  expandAllBtn.className = 'secondary';
+  expandAllBtn.textContent = 'Expand All';
+  expandAllBtn.style.padding = '4px 10px';
+  expandAllBtn.style.fontSize = '12px';
+  actions.appendChild(expandAllBtn);
+
+  const collapseAllBtn = document.createElement('button');
+  collapseAllBtn.type = 'button';
+  collapseAllBtn.className = 'secondary';
+  collapseAllBtn.textContent = 'Collapse All';
+  collapseAllBtn.style.padding = '4px 10px';
+  collapseAllBtn.style.fontSize = '12px';
+  actions.appendChild(collapseAllBtn);
+
+  header.appendChild(actions);
+  section.appendChild(header);
 
   const list = document.createElement('div');
   section.appendChild(list);
 
-  const renderStateCards = (states) => {
-    states.forEach(state => {
-      const stateCard = document.createElement('details');
-      stateCard.style.marginBottom = '10px';
-      stateCard.style.background = 'var(--bg-secondary)';
-      stateCard.style.border = '1px solid var(--border-color)';
-      stateCard.style.borderRadius = '4px';
-      stateCard.style.padding = '10px';
+  stateTransitions.forEach((state, index) => {
+    const stateCard = createStateDetailCard(state);
+    stateCard.open = index < 10;
+    list.appendChild(stateCard);
+  });
 
-    const summary = document.createElement('summary');
-    summary.textContent = `State ${state.id}`;
-    summary.style.cursor = 'pointer';
-    summary.style.fontWeight = 'bold';
-    summary.style.color = 'var(--btn-primary)';
-    stateCard.appendChild(summary);
-
-    const content = document.createElement('div');
-    content.style.marginTop = '10px';
-    content.style.fontSize = '13px';
-
-    // Items
-    if (state.items && state.items.length > 0) {
-      const itemsDiv = document.createElement('div');
-      const label = document.createElement('strong');
-      label.textContent = 'Items:';
-      itemsDiv.appendChild(label);
-      itemsDiv.appendChild(document.createElement('br'));
-      state.items.forEach(item => {
-        const itemLine = document.createElement('div');
-        itemLine.textContent = `  ${item.display}`;
-        itemLine.style.fontFamily = 'monospace';
-        itemLine.style.fontSize = '12px';
-        itemLine.style.marginLeft = '10px';
-        itemsDiv.appendChild(itemLine);
-      });
-      content.appendChild(itemsDiv);
-    }
-
-    // Shift transitions
-    if (state.shifts && state.shifts.length > 0) {
-      const shiftsDiv = document.createElement('div');
-      shiftsDiv.style.marginTop = '8px';
-      const label = document.createElement('strong');
-      label.textContent = 'Shifts: ';
-      const text = document.createElement('span');
-      text.textContent = state.shifts.map(s => `${s.symbol} → ${s.to_state}`).join(', ');
-      shiftsDiv.append(label, text);
-      content.appendChild(shiftsDiv);
-    }
-
-    // Goto transitions
-    if (state.gotos && state.gotos.length > 0) {
-      const gotosDiv = document.createElement('div');
-      gotosDiv.style.marginTop = '8px';
-      const label = document.createElement('strong');
-      label.textContent = 'Gotos: ';
-      const text = document.createElement('span');
-      text.textContent = state.gotos.map(g => `${g.symbol} → ${g.to_state}`).join(', ');
-      gotosDiv.append(label, text);
-      content.appendChild(gotosDiv);
-    }
-
-    // Reduce actions
-    if (state.reduces && state.reduces.length > 0) {
-      const reducesDiv = document.createElement('div');
-      reducesDiv.style.marginTop = '8px';
-      const label = document.createElement('strong');
-      label.textContent = 'Reduces: ';
-      const text = document.createElement('span');
-      text.textContent = state.reduces.map(r => `${r.symbol} → Rule #${r.rule_id}`).join(', ');
-      reducesDiv.append(label, text);
-      content.appendChild(reducesDiv);
-    }
-
-    if (state.conflicts && state.conflicts.length > 0) {
-      const conflictsDiv = document.createElement('div');
-      conflictsDiv.style.marginTop = '8px';
-      const label = document.createElement('strong');
-      label.textContent = 'Conflicts: ';
-      const text = document.createElement('span');
-      text.textContent = state.conflicts
-        .map(conflict => `${conflict.type.replace(/_/g, '/')} (${conflict.tokens.join(', ')})`)
-        .join(', ');
-      conflictsDiv.append(label, text);
-      content.appendChild(conflictsDiv);
-    }
-
-    stateCard.appendChild(content);
-      list.appendChild(stateCard);
+  expandAllBtn.addEventListener('click', () => {
+    list.querySelectorAll('details').forEach(card => {
+      if (card.style.display !== 'none') card.open = true;
     });
-  };
+  });
 
-  // Collapsible state list
-  renderStateCards(stateTransitions.slice(0, 10));
-
-  if (stateTransitions.length > 10) {
-    const showAllBtn = document.createElement('button');
-    showAllBtn.className = 'secondary';
-    showAllBtn.textContent = `Show ${stateTransitions.length - 10} more states`;
-    showAllBtn.style.marginTop = '10px';
-    showAllBtn.addEventListener('click', () => {
-      renderStateCards(stateTransitions.slice(10));
-      showAllBtn.remove();
+  collapseAllBtn.addEventListener('click', () => {
+    list.querySelectorAll('details').forEach(card => {
+      card.open = false;
     });
-    section.appendChild(showAllBtn);
+  });
+
+  return section;
+}
+
+function createStateDetailCard(state) {
+  const stateCard = document.createElement('details');
+  stateCard.dataset.stateDetailId = String(state.id);
+  stateCard._stateTransition = state;
+  stateCard.style.marginBottom = '10px';
+  stateCard.style.background = 'var(--bg-secondary)';
+  stateCard.style.border = '1px solid var(--border-color)';
+  stateCard.style.borderRadius = '4px';
+  stateCard.style.padding = '10px';
+
+  const summary = document.createElement('summary');
+  summary.style.cursor = 'pointer';
+  summary.style.fontWeight = 'bold';
+  summary.style.color = state.conflicts && state.conflicts.length > 0
+    ? 'var(--status-error-text)'
+    : 'var(--btn-primary)';
+  summary.textContent = `State ${state.id}`;
+  if (state.conflicts && state.conflicts.length > 0) {
+    const conflictLabel = document.createElement('span');
+    conflictLabel.textContent = ` conflict x${state.conflicts.length}`;
+    conflictLabel.style.marginLeft = '8px';
+    conflictLabel.style.fontSize = '12px';
+    conflictLabel.style.fontWeight = '600';
+    summary.appendChild(conflictLabel);
+  }
+  stateCard.appendChild(summary);
+
+  const content = document.createElement('div');
+  content.style.marginTop = '10px';
+  content.style.fontSize = '13px';
+
+  if (state.error) {
+    content.appendChild(createStateDetailLine('Error', state.error));
   }
 
+  if (state.items && state.items.length > 0) {
+    const itemsDiv = document.createElement('div');
+    const label = document.createElement('strong');
+    label.textContent = 'Items:';
+    itemsDiv.appendChild(label);
+    itemsDiv.appendChild(document.createElement('br'));
+    state.items.forEach(item => {
+      const itemLine = document.createElement('div');
+      itemLine.textContent = `  ${item.display}`;
+      itemLine.style.fontFamily = 'monospace';
+      itemLine.style.fontSize = '12px';
+      itemLine.style.marginLeft = '10px';
+      itemsDiv.appendChild(itemLine);
+    });
+    content.appendChild(itemsDiv);
+  }
+
+  if (state.shifts && state.shifts.length > 0) {
+    content.appendChild(createStateDetailLine(
+      'Shifts',
+      state.shifts.map(s => `${s.symbol} -> ${s.to_state}`).join(', ')
+    ));
+  }
+
+  if (state.gotos && state.gotos.length > 0) {
+    content.appendChild(createStateDetailLine(
+      'Gotos',
+      state.gotos.map(g => `${g.symbol} -> ${g.to_state}`).join(', ')
+    ));
+  }
+
+  if (state.reduces && state.reduces.length > 0) {
+    content.appendChild(createStateDetailLine(
+      'Reduces',
+      state.reduces.map(r => `${r.symbol} -> Rule #${r.rule_id}`).join(', ')
+    ));
+  }
+
+  if (state.conflicts && state.conflicts.length > 0) {
+    content.appendChild(createStateDetailLine(
+      'Conflicts',
+      state.conflicts
+        .map(conflict => `${conflict.type.replace(/_/g, '/')} (${(conflict.tokens || []).join(', ')})`)
+        .join(', ')
+    ));
+  }
+
+  stateCard.appendChild(content);
+  return stateCard;
+}
+
+function createStateDetailLine(labelText, value) {
+  const div = document.createElement('div');
+  div.style.marginTop = '8px';
+  const label = document.createElement('strong');
+  label.textContent = `${labelText}: `;
+  const text = document.createElement('span');
+  text.textContent = value;
+  div.append(label, text);
+  return div;
+}
+
+function createParseTableSection(stateTransitions) {
+  const section = document.createElement('div');
+  section.style.marginTop = '22px';
+
+  const titleEl = document.createElement('h5');
+  titleEl.textContent = 'Parse Table';
+  titleEl.style.color = 'var(--text-primary)';
+  titleEl.style.marginBottom = '10px';
+  titleEl.style.fontSize = '14px';
+  section.appendChild(titleEl);
+
+  const wrap = document.createElement('div');
+  wrap.style.overflowX = 'auto';
+  wrap.style.border = '1px solid var(--border-color)';
+  wrap.style.borderRadius = '4px';
+
+  const table = document.createElement('table');
+  table.style.width = '100%';
+  table.style.borderCollapse = 'collapse';
+  table.style.background = 'var(--bg-secondary)';
+
+  const thead = document.createElement('thead');
+  const headerRow = document.createElement('tr');
+  headerRow.style.background = 'var(--btn-primary)';
+  headerRow.style.color = 'white';
+  ['State', 'ACTION', 'GOTO', 'Conflicts'].forEach(header => {
+    const th = document.createElement('th');
+    th.textContent = header;
+    th.style.padding = '8px 10px';
+    th.style.textAlign = 'left';
+    th.style.fontSize = '12px';
+    headerRow.appendChild(th);
+  });
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  stateTransitions.forEach((state, index) => {
+    const row = document.createElement('tr');
+    row.style.background = index % 2 === 0 ? 'var(--bg-primary)' : 'var(--bg-secondary)';
+
+    const actions = [
+      ...(state.shifts || []).map(shift => `${shift.symbol}: s${shift.to_state}`),
+      ...(state.reduces || []).map(reduce => `${reduce.symbol}: r${reduce.rule_id}`),
+    ];
+    const gotos = (state.gotos || []).map(goto => `${goto.symbol}: ${goto.to_state}`);
+    const conflicts = (state.conflicts || []).map(conflict => (
+      `${conflict.type.replace(/_/g, '/')} ${(conflict.tokens || []).join(', ')}`
+    ));
+
+    [
+      state.id,
+      actions.length > 0 ? actions.join(', ') : '-',
+      gotos.length > 0 ? gotos.join(', ') : '-',
+      conflicts.length > 0 ? conflicts.join('; ') : '-',
+    ].forEach((value, columnIndex) => {
+      const td = document.createElement('td');
+      td.textContent = value;
+      td.style.padding = '7px 10px';
+      td.style.borderBottom = '1px solid var(--border-color)';
+      td.style.fontSize = '12px';
+      td.style.color = columnIndex === 3 && conflicts.length > 0
+        ? 'var(--status-error-text)'
+        : 'var(--text-primary)';
+      td.style.fontFamily = columnIndex === 0 ? "'Courier New', monospace" : '';
+      row.appendChild(td);
+    });
+
+    tbody.appendChild(row);
+  });
+
+  table.appendChild(tbody);
+  wrap.appendChild(table);
+  section.appendChild(wrap);
   return section;
 }
 
@@ -2644,58 +3313,84 @@ function createSyntaxDiagramsSection(syntaxDiagrams) {
   const section = document.createElement('div');
   section.style.marginBottom = '25px';
 
-  // Title
   const titleEl = document.createElement('h4');
   titleEl.textContent = `Syntax Diagrams (${Object.keys(syntaxDiagrams).length})`;
-  titleEl.style.color = '#34495e';
+  titleEl.style.color = 'var(--text-primary)';
   titleEl.style.marginBottom = '10px';
   titleEl.style.fontSize = '16px';
   section.appendChild(titleEl);
 
-  // Description
   const descEl = document.createElement('p');
-  descEl.textContent = 'Visual railroad diagrams for each nonterminal production rule';
+  descEl.textContent = 'Visual railroad diagrams for each nonterminal production rule. Diagrams render when opened.';
   descEl.style.color = 'var(--text-secondary)';
   descEl.style.fontSize = '13px';
   descEl.style.marginBottom = '15px';
   section.appendChild(descEl);
 
-  // Syntax diagrams for each nonterminal
   const symbols = Object.keys(syntaxDiagrams).sort();
+  const toolbar = document.createElement('div');
+  toolbar.style.display = 'flex';
+  toolbar.style.alignItems = 'center';
+  toolbar.style.gap = '10px';
+  toolbar.style.marginBottom = '12px';
+
+  const filterInput = document.createElement('input');
+  filterInput.type = 'search';
+  filterInput.placeholder = 'Filter diagrams by nonterminal';
+  filterInput.setAttribute('aria-label', 'Filter syntax diagrams');
+  filterInput.style.flex = '1 1 260px';
+  filterInput.style.padding = '7px 10px';
+  filterInput.style.border = '1px solid var(--border-color)';
+  filterInput.style.borderRadius = '4px';
+  filterInput.style.background = 'var(--bg-primary)';
+  filterInput.style.color = 'var(--text-primary)';
+  toolbar.appendChild(filterInput);
+
+  const visibleCount = document.createElement('span');
+  visibleCount.style.fontSize = '12px';
+  visibleCount.style.color = 'var(--text-secondary)';
+  toolbar.appendChild(visibleCount);
+  section.appendChild(toolbar);
+
+  const list = document.createElement('div');
+  section.appendChild(list);
 
   symbols.forEach(symbol => {
-    const diagramCard = document.createElement('div');
+    const diagramCard = document.createElement('details');
+    diagramCard.dataset.diagramSymbol = symbol.toLowerCase();
     diagramCard.style.background = 'var(--bg-secondary)';
     diagramCard.style.border = '1px solid var(--border-color)';
     diagramCard.style.borderRadius = '6px';
-    diagramCard.style.padding = '20px';
+    diagramCard.style.padding = '14px';
     diagramCard.style.marginBottom = '15px';
     diagramCard.style.overflow = 'auto';
 
-    // Symbol nameヘッダー
+    const summary = document.createElement('summary');
+    summary.textContent = symbol;
+    summary.style.cursor = 'pointer';
+    summary.style.fontSize = '16px';
+    summary.style.fontWeight = 'bold';
+    summary.style.color = 'var(--btn-primary)';
+    summary.style.fontFamily = "'Courier New', monospace";
+    diagramCard.appendChild(summary);
+
+    const content = document.createElement('div');
+    content.style.marginTop = '15px';
+
     const header = document.createElement('div');
     header.style.marginBottom = '15px';
     header.style.paddingBottom = '10px';
     header.style.borderBottom = '2px solid var(--border-color)';
     header.style.display = 'flex';
-    header.style.justifyContent = 'space-between';
+    header.style.justifyContent = 'flex-end';
     header.style.alignItems = 'center';
 
-    const symbolName = document.createElement('div');
-    symbolName.textContent = symbol;
-    symbolName.style.fontSize = '18px';
-    symbolName.style.fontWeight = 'bold';
-    symbolName.style.color = 'var(--btn-primary)';
-    symbolName.style.fontFamily = "'Courier New', monospace";
-    header.appendChild(symbolName);
-
-    // Export buttons群
     const exportButtons = document.createElement('div');
     exportButtons.style.display = 'flex';
     exportButtons.style.gap = '8px';
 
     const svgExportBtn = document.createElement('button');
-    svgExportBtn.textContent = '💾 SVG';
+    svgExportBtn.textContent = 'SVG';
     svgExportBtn.className = 'secondary';
     svgExportBtn.style.padding = '4px 10px';
     svgExportBtn.style.fontSize = '12px';
@@ -2703,7 +3398,7 @@ function createSyntaxDiagramsSection(syntaxDiagrams) {
     exportButtons.appendChild(svgExportBtn);
 
     const pngExportBtn = document.createElement('button');
-    pngExportBtn.textContent = '🖼️ PNG';
+    pngExportBtn.textContent = 'PNG';
     pngExportBtn.className = 'secondary';
     pngExportBtn.style.padding = '4px 10px';
     pngExportBtn.style.fontSize = '12px';
@@ -2711,9 +3406,8 @@ function createSyntaxDiagramsSection(syntaxDiagrams) {
     exportButtons.appendChild(pngExportBtn);
 
     header.appendChild(exportButtons);
-    diagramCard.appendChild(header);
+    content.appendChild(header);
 
-    // Insert SVG syntax diagram
     const svgContainer = document.createElement('div');
     svgContainer.style.textAlign = 'center';
     svgContainer.style.padding = '15px';
@@ -2724,38 +3418,73 @@ function createSyntaxDiagramsSection(syntaxDiagrams) {
     svgContainer.style.justifyContent = 'center';
     svgContainer.style.alignItems = 'center';
 
-    // Insert a sanitized SVG diagram.
-    const svg = parseSanitizedSvg(syntaxDiagrams[symbol]);
-    if (svg) {
+    const placeholder = document.createElement('span');
+    placeholder.textContent = 'Open to render diagram.';
+    placeholder.style.color = 'var(--text-secondary)';
+    svgContainer.appendChild(placeholder);
+
+    let renderedSvg = null;
+    let renderAttempted = false;
+    const renderDiagram = () => {
+      if (renderAttempted) return renderedSvg;
+      renderAttempted = true;
+      svgContainer.replaceChildren();
+
+      const svg = parseSanitizedSvg(syntaxDiagrams[symbol]);
+      if (!svg) {
+        svgExportBtn.disabled = true;
+        pngExportBtn.disabled = true;
+        const error = document.createElement('span');
+        error.textContent = 'Diagram could not be rendered safely.';
+        error.style.color = 'var(--status-error-text)';
+        svgContainer.appendChild(error);
+        return null;
+      }
+
       svg.style.maxWidth = '100%';
       svg.style.height = 'auto';
       svgContainer.appendChild(svg);
+      renderedSvg = svg;
+      return renderedSvg;
+    };
 
-      // SVG export button event listener
-      svgExportBtn.addEventListener('click', () => {
-        const filename = `${symbol}-syntax-diagram.svg`;
-        downloadSVG(svg, filename);
-        updateStatus(`SVG exported: ${filename}`, 'ready');
-      });
+    diagramCard.addEventListener('toggle', () => {
+      if (diagramCard.open) renderDiagram();
+    });
 
-      // PNG export button event listener
-      pngExportBtn.addEventListener('click', () => {
-        const filename = `${symbol}-syntax-diagram.png`;
-        downloadPNG(svg, filename);
-        updateStatus(`PNG export started: ${filename}`, 'ready');
-      });
-    } else {
-      svgExportBtn.disabled = true;
-      pngExportBtn.disabled = true;
-      const error = document.createElement('span');
-      error.textContent = 'Diagram could not be rendered safely.';
-      error.style.color = 'var(--status-error-text)';
-      svgContainer.appendChild(error);
-    }
+    svgExportBtn.addEventListener('click', () => {
+      const svg = renderDiagram();
+      if (!svg) return;
+      const filename = `${symbol}-syntax-diagram.svg`;
+      downloadSVG(svg, filename);
+      updateStatus(`SVG exported: ${filename}`, 'ready');
+    });
 
-    diagramCard.appendChild(svgContainer);
-    section.appendChild(diagramCard);
+    pngExportBtn.addEventListener('click', () => {
+      const svg = renderDiagram();
+      if (!svg) return;
+      const filename = `${symbol}-syntax-diagram.png`;
+      downloadPNG(svg, filename);
+      updateStatus(`PNG export started: ${filename}`, 'ready');
+    });
+
+    content.appendChild(svgContainer);
+    diagramCard.appendChild(content);
+    list.appendChild(diagramCard);
   });
+
+  const applyFilter = () => {
+    const query = filterInput.value.trim().toLowerCase();
+    let count = 0;
+    list.querySelectorAll('[data-diagram-symbol]').forEach(card => {
+      const visible = !query || card.dataset.diagramSymbol.includes(query);
+      card.style.display = visible ? '' : 'none';
+      if (visible) count += 1;
+    });
+    visibleCount.textContent = `${count} shown`;
+  };
+  filterInput.addEventListener('input', applyFilter);
+  applyFilter();
 
   return section;
 }
@@ -2954,6 +3683,7 @@ async function handleParse() {
   clearOutput();
   const source = editor.getValue().trim();
   const requestId = ++parseRequestId;
+  const previousParseResult = latestParseResult;
 
   if (!source) {
     showError('Input is empty. Please enter .y file content.');
@@ -2971,7 +3701,7 @@ async function handleParse() {
 
     if (result.success) {
       updateStatus('Parse successful', 'ready');
-      showStructuredResult(result);
+      showStructuredResult(result, previousParseResult);
       // Show new rule add button
       addRuleBtn.style.display = 'block';
       // Save parse result and enable export button
@@ -3401,13 +4131,66 @@ function escapeHtml(text) {
   return String(text).replace(/[&<>"']/g, m => map[m]);
 }
 
+function prepareSvgCloneForExport(svgElement) {
+  const svgClone = svgElement.cloneNode(true);
+  sanitizeSvgElement(svgClone);
+  inlineSvgComputedStyles(svgElement, svgClone);
+  svgClone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  svgClone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+  addSvgExportBackground(svgElement, svgClone);
+  return svgClone;
+}
+
+function inlineSvgComputedStyles(sourceRoot, cloneRoot) {
+  const sourceNodes = [sourceRoot, ...sourceRoot.querySelectorAll('*')];
+  const cloneNodes = [cloneRoot, ...cloneRoot.querySelectorAll('*')];
+
+  sourceNodes.forEach((sourceNode, index) => {
+    const cloneNode = cloneNodes[index];
+    if (!cloneNode || !(sourceNode instanceof Element)) return;
+
+    const computed = getComputedStyle(sourceNode);
+    SVG_EXPORT_STYLE_PROPS.forEach(prop => {
+      const value = computed.getPropertyValue(prop);
+      if (value) cloneNode.style.setProperty(prop, value);
+    });
+  });
+}
+
+function getSvgExportSize(svgElement) {
+  const width = svgElement.width?.baseVal?.value || Number(svgElement.getAttribute('width')) || 800;
+  const height = svgElement.height?.baseVal?.value || Number(svgElement.getAttribute('height')) || 600;
+  return { width, height };
+}
+
+function getExportBackgroundColor(svgElement) {
+  let node = svgElement;
+  while (node && node instanceof Element) {
+    const color = getComputedStyle(node).backgroundColor;
+    if (color && color !== 'rgba(0, 0, 0, 0)' && color !== 'transparent') {
+      return color;
+    }
+    node = node.parentElement;
+  }
+  return isDarkMode ? '#1e1e1e' : '#ffffff';
+}
+
+function addSvgExportBackground(sourceSvg, cloneSvg) {
+  const { width, height } = getSvgExportSize(sourceSvg);
+  const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  background.setAttribute('x', '0');
+  background.setAttribute('y', '0');
+  background.setAttribute('width', width);
+  background.setAttribute('height', height);
+  background.setAttribute('fill', getExportBackgroundColor(sourceSvg));
+  cloneSvg.insertBefore(background, cloneSvg.firstChild);
+}
+
 /**
  * Download SVG
  */
 function downloadSVG(svgElement, filename) {
-  // Create SVG element clone
-  const svgClone = svgElement.cloneNode(true);
-  sanitizeSvgElement(svgClone);
+  const svgClone = prepareSvgCloneForExport(svgElement);
   const svgString = new XMLSerializer().serializeToString(svgClone);
 
   const blob = new Blob([svgString], { type: 'image/svg+xml' });
@@ -3426,13 +4209,11 @@ function downloadSVG(svgElement, filename) {
  * Convert SVG to PNG and download
  */
 function downloadPNG(svgElement, filename) {
-  const svgClone = svgElement.cloneNode(true);
-  sanitizeSvgElement(svgClone);
+  const svgClone = prepareSvgCloneForExport(svgElement);
   const svgString = new XMLSerializer().serializeToString(svgClone);
 
   // Get SVG size
-  const svgWidth = svgElement.width.baseVal.value || 800;
-  const svgHeight = svgElement.height.baseVal.value || 600;
+  const { width: svgWidth, height: svgHeight } = getSvgExportSize(svgElement);
 
   // Create Canvas element
   const canvas = document.createElement('canvas');
@@ -3440,8 +4221,8 @@ function downloadPNG(svgElement, filename) {
   canvas.height = svgHeight * 2;
   const ctx = canvas.getContext('2d');
 
-  // Draw white background
-  ctx.fillStyle = 'white';
+  // Draw the same background the SVG will use when exported.
+  ctx.fillStyle = getExportBackgroundColor(svgElement);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Load SVG as Image

@@ -1,9 +1,11 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Test script for lrama_bundle.rb
+# Test script for the bundled Lrama runtime and browser-facing API.
 
-require_relative '../ruby/src/lrama_bundle'
+require 'json'
+
+require_relative '../ruby/src/lrama_api'
 
 puts "=== Lrama Bundle Test ==="
 puts ""
@@ -97,6 +99,54 @@ begin
       puts "  ✗ Sample has no rules: #{File.basename(path)}"
       failures << "Sample has no rules: #{File.basename(path)}"
     end
+
+    api_result = JSON.parse(LramaAPI.parse(source))
+    grammar_info = api_result['grammar'] || {}
+
+    unless api_result['success']
+      puts "  ✗ API parse failed: #{File.basename(path)}"
+      failures << "API parse failed: #{File.basename(path)}"
+      next
+    end
+
+    [
+      ['tokens', Array],
+      ['nonterminals', Array],
+      ['rules', Array],
+      ['first_sets', Hash],
+      ['follow_sets', Hash],
+      ['state_transitions', Array]
+    ].each do |field, expected_class|
+      if grammar_info[field].is_a?(expected_class)
+        puts "  ✓ API #{field}: #{File.basename(path)}"
+      else
+        puts "  ✗ API #{field} missing for #{File.basename(path)}"
+        failures << "API #{field} missing for #{File.basename(path)}"
+      end
+    end
+  end
+
+  api_result = JSON.parse(LramaAPI.parse(test_grammar))
+  grammar_info = api_result.fetch('grammar')
+  token_names = grammar_info.fetch('tokens').map { |token| token.fetch('name') }
+  rule_names = grammar_info.fetch('rules').map { |rule| rule.fetch('lhs') }
+
+  unless token_names.include?('NUMBER')
+    failures << "API tokens do not include NUMBER"
+  end
+
+  unless rule_names.include?('expr')
+    failures << "API rules do not include expr"
+  end
+
+  unless grammar_info.fetch('first_sets').fetch('expr').include?('NUMBER')
+    failures << "API FIRST(expr) does not include NUMBER"
+  end
+
+  unless grammar_info.fetch('state_transitions').any? { |state|
+    state.fetch('shifts').any? || state.fetch('gotos').any? || state.fetch('reduces').any?
+  }
+    failures << "API state transitions do not expose parser actions"
   end
 
   unless failures.empty?
