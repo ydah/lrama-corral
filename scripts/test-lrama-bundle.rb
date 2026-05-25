@@ -115,7 +115,8 @@ begin
       ['rules', Array],
       ['first_sets', Hash],
       ['follow_sets', Hash],
-      ['state_transitions', Array]
+      ['state_transitions', Array],
+      ['resolved_conflicts', Array]
     ].each do |field, expected_class|
       if grammar_info[field].is_a?(expected_class)
         puts "  ✓ API #{field}: #{File.basename(path)}"

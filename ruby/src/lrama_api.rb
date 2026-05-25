@@ -139,6 +139,7 @@ module LramaAPI
       first_sets = {}
       follow_sets = {}
       conflicts = []
+      resolved_conflicts = []
       state_transitions = []
       nullable_symbols = []
       lint = {}
@@ -210,6 +211,8 @@ module LramaAPI
             }
           end
 
+          resolved_conflicts.concat(extract_resolved_conflicts(state))
+
           # Extract state transitions
           state_data = extract_state_transitions(state, grammar)
           state_transitions << state_data if state_data
@@ -259,6 +262,7 @@ module LramaAPI
         first_sets: first_sets,
         follow_sets: follow_sets,
         conflicts: conflicts,
+        resolved_conflicts: resolved_conflicts,
         expectations: expectations,
         lint: lint,
         analysis_warnings: analysis_warnings,
@@ -688,6 +692,23 @@ module LramaAPI
         conflicts: [],
         error: e.message
       }
+    end
+
+    def extract_resolved_conflicts(state)
+      return [] unless state.respond_to?(:resolved_conflicts) && state.resolved_conflicts
+
+      state.resolved_conflicts.map do |conflict|
+        {
+          state: state.id,
+          symbol: conflict.symbol&.id&.s_value,
+          rule: conflict.reduce&.rule&.id,
+          resolution: conflict.which,
+          same_precedence: conflict.same_prec,
+          message: conflict.report_message
+        }
+      end
+    rescue
+      []
     end
 
     # Format item for display

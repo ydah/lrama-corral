@@ -46,6 +46,16 @@
  */
 
 /**
+ * @typedef {Object} ResolvedGrammarConflict
+ * @property {number} state
+ * @property {string} symbol
+ * @property {number} rule
+ * @property {'shift'|'reduce'|'error'|string} resolution
+ * @property {boolean} same_precedence
+ * @property {string} message
+ */
+
+/**
  * @typedef {Object} StateTransition
  * @property {number} id
  * @property {{rule_id:number, position:number, display:string}[]} items
@@ -65,6 +75,7 @@
  * @property {Record<string, string[]>} first_sets
  * @property {Record<string, string[]>} follow_sets
  * @property {GrammarConflict[]} conflicts
+ * @property {ResolvedGrammarConflict[]} resolved_conflicts
  * @property {StateTransition[]} state_transitions
  * @property {Record<string, string>} syntax_diagrams
  */

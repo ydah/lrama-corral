@@ -1512,6 +1512,10 @@ function showStructuredResult(data, previousResult = null) {
     outputEl.appendChild(conflictsSection);
   }
 
+  if (grammar.resolved_conflicts && grammar.resolved_conflicts.length > 0) {
+    outputEl.appendChild(createResolvedConflictsSection(grammar.resolved_conflicts));
+  }
+
   if (grammar.expectations) {
     outputEl.appendChild(createExpectationsSection(grammar.expectations));
   }
@@ -1908,6 +1912,80 @@ function createConflictsSection(conflicts) {
     }
 
     section.appendChild(conflictCard);
+  });
+
+  return section;
+}
+
+function createResolvedConflictsSection(resolvedConflicts) {
+  const section = document.createElement('div');
+  section.style.marginBottom = '25px';
+
+  const titleEl = document.createElement('h4');
+  titleEl.textContent = `Resolved Conflicts (${resolvedConflicts.length})`;
+  titleEl.style.color = 'var(--status-ready-text)';
+  titleEl.style.marginBottom = '10px';
+  titleEl.style.fontSize = '16px';
+  section.appendChild(titleEl);
+
+  const descEl = document.createElement('p');
+  descEl.textContent = 'Conflicts resolved by precedence or associativity before they become parser conflicts.';
+  descEl.style.color = 'var(--text-secondary)';
+  descEl.style.fontSize = '13px';
+  descEl.style.marginBottom = '12px';
+  section.appendChild(descEl);
+
+  resolvedConflicts.forEach(conflict => {
+    const card = document.createElement('div');
+    card.style.background = 'rgba(46, 204, 113, 0.1)';
+    card.style.border = '1px solid rgba(46, 204, 113, 0.35)';
+    card.style.borderRadius = '6px';
+    card.style.padding = '12px';
+    card.style.marginBottom = '10px';
+
+    const message = document.createElement('div');
+    message.textContent = conflict.message || `Resolved as ${conflict.resolution}`;
+    message.style.color = 'var(--text-primary)';
+    message.style.fontSize = '13px';
+    card.appendChild(message);
+
+    const meta = document.createElement('div');
+    meta.textContent = `State ${conflict.state}, Rule #${conflict.rule}, Symbol ${conflict.symbol || '-'}`;
+    meta.style.color = 'var(--text-secondary)';
+    meta.style.fontSize = '12px';
+    meta.style.marginTop = '6px';
+    card.appendChild(meta);
+
+    const actions = document.createElement('div');
+    actions.style.display = 'flex';
+    actions.style.gap = '8px';
+    actions.style.flexWrap = 'wrap';
+    actions.style.marginTop = '10px';
+
+    const stateBtn = document.createElement('button');
+    stateBtn.type = 'button';
+    stateBtn.className = 'secondary';
+    stateBtn.textContent = `Open State ${conflict.state}`;
+    stateBtn.setAttribute('aria-label', `Open state ${conflict.state} details`);
+    stateBtn.style.padding = '5px 10px';
+    stateBtn.style.fontSize = '12px';
+    stateBtn.addEventListener('click', () => scrollToStateDetails(conflict.state));
+    actions.appendChild(stateBtn);
+
+    if (Number.isInteger(conflict.rule)) {
+      const ruleBtn = document.createElement('button');
+      ruleBtn.type = 'button';
+      ruleBtn.className = 'secondary';
+      ruleBtn.textContent = `Jump Rule #${conflict.rule}`;
+      ruleBtn.setAttribute('aria-label', `Jump to rule ${conflict.rule}`);
+      ruleBtn.style.padding = '5px 10px';
+      ruleBtn.style.fontSize = '12px';
+      ruleBtn.addEventListener('click', () => jumpToRuleById(conflict.rule));
+      actions.appendChild(ruleBtn);
+    }
+
+    card.appendChild(actions);
+    section.appendChild(card);
   });
 
   return section;
