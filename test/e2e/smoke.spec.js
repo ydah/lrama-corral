@@ -16,7 +16,24 @@ test('loads a sample grammar and renders parser analysis', async ({ page }) => {
   await expect(page.locator('#status')).toContainText('Parse successful', { timeout: 90_000 });
   await expect(page.getByRole('heading', { name: 'Grammar Structure' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /State Transition Diagram/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Parse Table' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /Syntax Diagrams/ })).toBeVisible();
+  await expect(page.locator('#output svg script')).toHaveCount(0);
+
+  const unsafeSvgAttributes = await page.locator('#output svg').evaluateAll((svgs) => {
+    return svgs.flatMap(svg => {
+      return Array.from(svg.querySelectorAll('*')).flatMap(element => {
+        return Array.from(element.attributes)
+          .filter(attribute => {
+            const name = attribute.name.toLowerCase();
+            const value = attribute.value.trim().toLowerCase();
+            return name.startsWith('on') || value.startsWith('javascript:');
+          })
+          .map(attribute => `${element.tagName}:${attribute.name}`);
+      });
+    });
+  });
+  expect(unsafeSvgAttributes).toEqual([]);
 });
 
 test('validates a sample grammar', async ({ page }) => {

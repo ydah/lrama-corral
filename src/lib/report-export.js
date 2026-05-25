@@ -179,6 +179,10 @@ export function generateHTMLReport(source, grammar) {
     });
   }
 
+  if (grammar.state_transitions && grammar.state_transitions.length > 0) {
+    html += renderParseTable(grammar.state_transitions);
+  }
+
   html += `<h2>Source Code</h2><pre>${escapeHtml(source)}</pre>`;
 
   html += `
@@ -225,6 +229,24 @@ function renderExpectations(expectations) {
       ? 'not declared'
       : data.satisfied ? 'satisfied' : 'mismatch';
     html += `<tr><td>${escapeHtml(label)}</td><td>${escapeHtml(data.actual ?? '-')}</td><td>${escapeHtml(data.expected ?? '-')}</td><td>${escapeHtml(status)}</td></tr>`;
+  });
+  html += `</tbody></table>`;
+  return html;
+}
+
+function renderParseTable(stateTransitions) {
+  let html = `<h2>Parse Table</h2><table><thead><tr><th>State</th><th>ACTION</th><th>GOTO</th><th>Conflicts</th></tr></thead><tbody>`;
+  stateTransitions.forEach(state => {
+    const actions = [
+      ...(state.shifts || []).map(shift => `${shift.symbol}: s${shift.to_state}`),
+      ...(state.reduces || []).map(reduce => `${reduce.symbol}: r${reduce.rule_id}`),
+    ];
+    const gotos = (state.gotos || []).map(goto => `${goto.symbol}: ${goto.to_state}`);
+    const conflicts = (state.conflicts || []).map(conflict => (
+      `${String(conflict.type || '').replace(/_/g, '/')} ${(conflict.tokens || []).join(', ')}`
+    ));
+
+    html += `<tr><td>${escapeHtml(state.id)}</td><td>${escapeHtml(actions.length > 0 ? actions.join(', ') : '-')}</td><td>${escapeHtml(gotos.length > 0 ? gotos.join(', ') : '-')}</td><td>${escapeHtml(conflicts.length > 0 ? conflicts.join('; ') : '-')}</td></tr>`;
   });
   html += `</tbody></table>`;
   return html;

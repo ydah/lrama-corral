@@ -134,7 +134,16 @@ test('generateHTMLReport includes resolved conflicts and display names', () => {
         action: null,
       },
     ],
-    state_transitions: [],
+    state_transitions: [
+      {
+        id: 5,
+        items: [],
+        shifts: [{ symbol: 'PLUS', to_state: 6 }],
+        gotos: [{ symbol: 'expr', to_state: 7 }],
+        reduces: [{ symbol: '$end', rule_id: 2 }],
+        conflicts: [],
+      },
+    ],
     syntax_diagrams: {},
   });
 
@@ -142,4 +151,8 @@ test('generateHTMLReport includes resolved conflicts and display names', () => {
   assert.match(html, /STATE 5/);
   assert.match(html, /Rule:<\/strong> #2/);
   assert.match(html, /&quot;\+&quot;/);
+  assert.match(html, /Parse Table/);
+  assert.match(html, /PLUS: s6/);
+  assert.match(html, /expr: 7/);
+  assert.match(html, /\$end: r2/);
 });
