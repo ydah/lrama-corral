@@ -160,6 +160,27 @@ begin
     failures << "API state transitions do not expose parser actions"
   end
 
+  expect_rr_grammar = <<~GRAMMAR
+    %expect-rr 1
+    %token NUMBER
+
+    %%
+
+    expr: NUMBER
+        ;
+
+    %%
+  GRAMMAR
+  expect_rr_result = JSON.parse(LramaAPI.parse(expect_rr_grammar))
+  if expect_rr_result['success']
+    expectation = expect_rr_result.fetch('grammar').fetch('expectations').fetch('reduce_reduce')
+    unless expectation.fetch('expected') == 1 && expectation.fetch('actual') == 0 && expectation.fetch('satisfied') == false
+      failures << "API %expect-rr expectation mismatch"
+    end
+  else
+    failures << "API failed to parse %expect-rr compatibility directive"
+  end
+
   unless failures.empty?
     puts ""
     puts "=== Test Failures ==="

@@ -52,7 +52,7 @@ module LramaAPI
     def parse(source)
       begin
         # Parse with Lrama parser
-        parser = Lrama::Parser.new(source, "input.y")
+        parser = Lrama::Parser.new(preprocess_source_for_lrama(source), "input.y")
         grammar = parser.parse
 
         # Extract grammar information
@@ -83,7 +83,7 @@ module LramaAPI
     # @return [String] Validation result in JSON format
     def validate(source)
       begin
-        parser = Lrama::Parser.new(source, "input.y")
+        parser = Lrama::Parser.new(preprocess_source_for_lrama(source), "input.y")
         grammar = parser.parse
 
         # Validation success
@@ -169,7 +169,7 @@ module LramaAPI
         # Build States (LALR state machine)
         states = Lrama::States.new(grammar, trace_state: false)
         states.compute
-        expectations = extract_expectations(grammar, states)
+        expectations = extract_expectations(grammar, states, source)
 
         # Extract Follow sets
         states.follow_sets.each do |(state_id, nterm_token_id), terms|
@@ -277,6 +277,7 @@ module LramaAPI
         capabilities: [
           'parse',
           'validate',
+          'conflict_expectations',
           'first_sets',
           'follow_sets',
           'nullable_symbols',
@@ -319,10 +320,12 @@ module LramaAPI
         .sort
     end
 
-    def extract_expectations(grammar, states)
+    def extract_expectations(grammar, states, source)
       expected_sr = grammar.respond_to?(:expect) ? grammar.expect : nil
+      expected_rr = extract_expect_rr_directive(source)
       actual_sr = states.respond_to?(:sr_conflicts_count) ? states.sr_conflicts_count : nil
       actual_rr = states.respond_to?(:rr_conflicts_count) ? states.rr_conflicts_count : nil
+      rr_expected_value = expected_rr.nil? ? 0 : expected_rr
 
       {
         shift_reduce: {
@@ -331,11 +334,29 @@ module LramaAPI
           satisfied: expected_sr.nil? ? nil : expected_sr == actual_sr
         },
         reduce_reduce: {
-          expected: 0,
+          expected: rr_expected_value,
           actual: actual_rr,
-          satisfied: actual_rr.nil? ? nil : actual_rr == 0
+          satisfied: actual_rr.nil? ? nil : actual_rr == rr_expected_value
         }
       }
+    end
+
+    def extract_expect_rr_directive(source)
+      return nil unless source
+
+      source.each_line do |line|
+        next unless line =~ /^\s*%expect-rr\s+(\d+)\b/
+
+        return Regexp.last_match(1).to_i
+      end
+
+      nil
+    end
+
+    def preprocess_source_for_lrama(source)
+      source.each_line.map do |line|
+        line =~ /^\s*%expect-rr\s+\d+\b/ ? "\n" : line
+      end.join
     end
 
     def internal_symbol_name?(name)
