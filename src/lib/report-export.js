@@ -1,14 +1,6 @@
 /** @typedef {import('./grammar-types.js').Grammar} Grammar */
 
-const LINT_LABELS = {
-  undefined_symbols: 'Undefined Symbols',
-  unused_tokens: 'Unused Tokens',
-  unreachable_nonterminals: 'Unreachable Nonterminals',
-  unused_rules: 'Unused Rules',
-  non_productive_nonterminals: 'Nonproductive Nonterminals',
-  referenced_nonterminals_without_rules: 'Referenced Nonterminals Without Rules',
-  declared_nonterminals_without_rules: 'Declared Nonterminals Without Rules',
-};
+import { LINT_LABELS, formatLabel } from './grammar-labels.js';
 
 /**
  * Generate a standalone HTML report for a parsed grammar.
@@ -320,12 +312,6 @@ function locationLabel(location) {
     return `line ${location.line}:${location.column}-line ${location.end_line}:${location.end_column}`;
   }
   return `line ${location.line}:${location.column}`;
-}
-
-function formatLabel(value) {
-  return String(value)
-    .replace(/_/g, ' ')
-    .replace(/\b[a-z]/g, letter => letter.toUpperCase());
 }
 
 function escapeHtml(value) {

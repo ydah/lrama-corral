@@ -22,6 +22,7 @@ import {
 } from './lib/file-names.js';
 import { readStorage, writeStorage } from './lib/safe-storage.js';
 import { generateHTMLReport } from './lib/report-export.js';
+import { LINT_LABELS } from './lib/grammar-labels.js';
 import { calculateStateGraphLayout } from './lib/state-graph-layout.js';
 import { downloadPNG, downloadSVG } from './lib/svg-export.js';
 import { registerYaccLanguage } from './lib/yacc-language.js';
@@ -1495,16 +1496,6 @@ function hasLintFindings(lint) {
 }
 
 function createLintSection(lint) {
-  const labels = {
-    undefined_symbols: 'Undefined Symbols',
-    unused_tokens: 'Unused Tokens',
-    unreachable_nonterminals: 'Unreachable Nonterminals',
-    unused_rules: 'Unused Rules',
-    non_productive_nonterminals: 'Nonproductive Nonterminals',
-    referenced_nonterminals_without_rules: 'Referenced Nonterminals Without Rules',
-    declared_nonterminals_without_rules: 'Declared Nonterminals Without Rules',
-  };
-
   const section = document.createElement('div');
   section.style.marginBottom = '25px';
 
@@ -1515,7 +1506,7 @@ function createLintSection(lint) {
   titleEl.style.fontSize = '16px';
   section.appendChild(titleEl);
 
-  Object.entries(labels).forEach(([key, label]) => {
+  Object.entries(LINT_LABELS).forEach(([key, label]) => {
     const values = lint[key] || [];
     if (values.length === 0) return;
 
