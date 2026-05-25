@@ -201,6 +201,18 @@
       display: flex;
       gap: 10px;
       margin-bottom: 20px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .inline-control {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0;
+      color: var(--text-primary);
+      font-size: 14px;
+      font-weight: 600;
     }
 
     button {
@@ -545,6 +557,39 @@
       border-top: 1px solid var(--border-color);
     }
 
+    .command-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-top: 12px;
+      max-height: 320px;
+      overflow-y: auto;
+    }
+
+    #commandInput {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+
+    .command-item {
+      width: 100%;
+      text-align: left;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+    }
+
+    .command-item:hover,
+    .command-item:focus {
+      background: var(--status-bg);
+      color: var(--text-primary);
+    }
+
     .add-rule-btn {
       position: fixed;
       bottom: 30px;
@@ -757,6 +802,10 @@
         <button id="exportBtn" class="secondary" disabled>Export Report</button>
         <button id="undoBtn" class="secondary" disabled title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶ Undo</button>
         <button id="redoBtn" class="secondary" disabled title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↷ Redo</button>
+        <label class="inline-control" for="autoParseToggle">
+          <input type="checkbox" id="autoParseToggle">
+          Auto Parse
+        </label>
       </div>
 
       <div id="output" class="output-section"></div>
@@ -853,11 +902,31 @@
           </div>
         </div>
 
+        <div class="form-group" id="ruleInsertPositionGroup">
+          <label for="ruleInsertPosition">Insert Position</label>
+          <select id="ruleInsertPosition">
+            <option value="after-rules-start">After first %%</option>
+            <option value="cursor">At cursor</option>
+            <option value="before-epilogue">Before epilogue %%</option>
+          </select>
+        </div>
+
         <div class="modal-actions">
           <button type="button" id="modalCancel" class="secondary">Cancel</button>
           <button type="submit" id="modalSave">Save Rule</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="commandPalette" class="modal" role="dialog" aria-modal="true" aria-labelledby="commandPaletteTitle" aria-hidden="true">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 id="commandPaletteTitle">Command Palette</h3>
+        <button class="modal-close" id="commandPaletteClose" aria-label="Close command palette">×</button>
+      </div>
+      <input type="text" id="commandInput" placeholder="Command" autocomplete="off">
+      <div id="commandList" class="command-list"></div>
     </div>
   </div>
 

@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  countSymbolReferences,
   ensureNonterminalRuleStub,
   escapeRegExp,
   findRuleEndLine,
+  renameSymbolEverywhere,
   removeSymbolFromDeclarationLine,
   upsertNonterminalDeclaration,
   upsertTokenDeclaration,
@@ -81,4 +83,39 @@ test('upsertNonterminalDeclaration moves symbols between type declarations', () 
 
   assert.equal(lines.includes('%type <new> expr'), true);
   assert.equal(lines[0], '%type <old> other');
+});
+
+test('renameSymbolEverywhere renames declarations and grammar references outside actions', () => {
+  const lines = [
+    '%token NUMBER PLUS',
+    '',
+    '%%',
+    'expr: NUMBER { puts "NUMBER"; }',
+    '    | expr PLUS NUMBER',
+    '    ;',
+    '%%',
+    'NUMBER = 1',
+  ];
+
+  const count = renameSymbolEverywhere(lines, 'NUMBER', 'INT');
+
+  assert.equal(count, 3);
+  assert.equal(lines[0], '%token INT PLUS');
+  assert.equal(lines[3], 'expr: INT { puts "NUMBER"; }');
+  assert.equal(lines[4], '    | expr PLUS INT');
+  assert.equal(lines[7], 'NUMBER = 1');
+});
+
+test('countSymbolReferences ignores comments, string aliases, actions, and epilogue', () => {
+  const lines = [
+    '%token PLUS "+"',
+    '/* PLUS */',
+    '%%',
+    'expr: PLUS { puts "PLUS"; }',
+    '    ;',
+    '%%',
+    'PLUS',
+  ];
+
+  assert.equal(countSymbolReferences(lines, 'PLUS'), 2);
 });

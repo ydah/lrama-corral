@@ -1,7 +1,11 @@
 import { lramaBridge } from './lib/lrama-bridge.js';
 import { readStorage, writeStorage } from './lib/safe-storage.js';
 import {
+  countSymbolReferences,
   findRuleEndLine,
+  findRulesSectionEnd,
+  findRulesSectionStart,
+  renameSymbolEverywhere,
   removeSymbolFromDeclarationLine,
   removeTypeDeclaration as removeTypeDeclarationFromLines,
   upsertNonterminalDeclaration,
@@ -27,6 +31,7 @@ const uploadBtn = document.getElementById('uploadBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 const exportBtn = document.getElementById('exportBtn');
 const fileInput = document.getElementById('fileInput');
+const autoParseToggle = document.getElementById('autoParseToggle');
 const themeToggle = document.getElementById('themeToggle');
 const undoBtn = document.getElementById('undoBtn');
 const redoBtn = document.getElementById('redoBtn');
@@ -37,6 +42,8 @@ const modalCancel = document.getElementById('modalCancel');
 const modalTitle = document.getElementById('modalTitle');
 const ruleForm = document.getElementById('ruleForm');
 const ruleLHS = document.getElementById('ruleLHS');
+const ruleInsertPosition = document.getElementById('ruleInsertPosition');
+const ruleInsertPositionGroup = document.getElementById('ruleInsertPositionGroup');
 const rhsSymbols = document.getElementById('rhsSymbols');
 const symbolInput = document.getElementById('symbolInput');
 const addSymbolBtn = document.getElementById('addSymbolBtn');
@@ -59,6 +66,11 @@ const symbolTypeModalCancel = document.getElementById('symbolTypeModalCancel');
 const symbolTypeSymbolName = document.getElementById('symbolTypeSymbolName');
 const registerAsTokenBtn = document.getElementById('registerAsTokenBtn');
 const registerAsNonterminalBtn = document.getElementById('registerAsNonterminalBtn');
+
+const commandPalette = document.getElementById('commandPalette');
+const commandPaletteClose = document.getElementById('commandPaletteClose');
+const commandInput = document.getElementById('commandInput');
+const commandList = document.getElementById('commandList');
 
 // Monaco Editor instance
 let editor = null;
@@ -92,9 +104,11 @@ const DEFAULT_DOWNLOAD_FILENAME = 'grammar.y';
 const DRAFT_STORAGE_KEY = 'lrama-corral:draft';
 const THEME_STORAGE_KEY = 'lrama-corral:theme';
 const MAX_GRAMMAR_FILE_SIZE = 1024 * 1024;
+const AUTO_PARSE_DELAY_MS = 700;
 let currentFileName = DEFAULT_DOWNLOAD_FILENAME;
 let isDirty = false;
 let draftSaveTimer = null;
+let autoParseTimer = null;
 
 /**
  * Yacc/Bison language definition for Monaco Editor
@@ -486,6 +500,7 @@ factor: NUMBER
     updateUndoRedoButtons();
     invalidateParseResult();
     scheduleDraftSave();
+    scheduleAutoParse();
     isDirty = true;
   });
 
@@ -595,6 +610,17 @@ function scheduleDraftSave() {
   }, 300);
 }
 
+function scheduleAutoParse() {
+  window.clearTimeout(autoParseTimer);
+  if (!autoParseToggle.checked || !editor) return;
+
+  autoParseTimer = window.setTimeout(() => {
+    if (getActiveModal() || parseBtn.disabled) return;
+    if (!editor.getValue().trim()) return;
+    handleParse();
+  }, AUTO_PARSE_DELAY_MS);
+}
+
 function replaceEditorContent(content, source = 'lrama-corral') {
   if (!editor) return;
 
@@ -640,6 +666,41 @@ function insertEditorText(lineNumber, column, text, source = 'lrama-corral') {
     forceMoveMarkers: true,
   }]);
   editor.pushUndoStop();
+}
+
+function getRuleInsertionPoint(lines) {
+  const mode = ruleInsertPosition.value;
+
+  if (mode === 'cursor' && editor) {
+    const position = editor.getPosition();
+    return {
+      lineNumber: position.lineNumber,
+      column: 1,
+      revealLineNumber: position.lineNumber,
+    };
+  }
+
+  if (mode === 'before-epilogue') {
+    const rulesEnd = findRulesSectionEnd(lines);
+    if (rulesEnd !== -1 && rulesEnd < lines.length) {
+      return {
+        lineNumber: rulesEnd + 1,
+        column: 1,
+        revealLineNumber: rulesEnd + 1,
+      };
+    }
+  }
+
+  const rulesStart = findRulesSectionStart(lines);
+  if (rulesStart !== -1) {
+    return {
+      lineNumber: Math.min(rulesStart + 3, lines.length + 1),
+      column: 1,
+      revealLineNumber: Math.min(rulesStart + 4, lines.length + 1),
+    };
+  }
+
+  return null;
 }
 
 function invalidateParseResult() {
@@ -709,7 +770,7 @@ function setParseMarkers(errors = []) {
 }
 
 function getActiveModal() {
-  const activeModals = [symbolModal, symbolTypeModal, ruleModal]
+  const activeModals = [symbolModal, symbolTypeModal, ruleModal, commandPalette]
     .filter(modal => modal.classList.contains('active'));
   return activeModals.at(-1) || null;
 }
@@ -735,6 +796,8 @@ function closeTopModal() {
     closeSymbolTypeModal(true);
   } else if (activeModal === ruleModal) {
     closeRuleModal();
+  } else if (activeModal === commandPalette) {
+    closeCommandPalette();
   }
 
   return true;
@@ -839,12 +902,25 @@ function handleSaveSymbol(event) {
     return;
   }
 
+  const oldName = editingSymbolOriginalName;
+  if (oldName && oldName !== name) {
+    const referenceCount = countSymbolReferences(lines, oldName);
+    const confirmed = confirm(
+      `Rename "${oldName}" to "${name}" in ${referenceCount} grammar reference(s)?`
+    );
+    if (!confirmed) return;
+  }
+
   if (editingSymbolType === 'token') {
     // Add/edit token
     updateTokenDeclaration(lines, name, typeValue, tokenIdValue);
   } else {
     // Add/edit nonterminal
     updateNonterminalDeclaration(lines, name, typeValue);
+  }
+
+  if (oldName && oldName !== name) {
+    renameSymbolEverywhere(lines, oldName, name);
   }
 
   replaceEditorContent(lines.join('\n'));
@@ -897,15 +973,19 @@ function removeTypeDeclaration(lines, name) {
 function handleDeleteSymbol(type, symbolData) {
   const name = symbolData.name;
 
-  if (!confirm(`Are you sure you want to delete "${name}"?`)) {
-    return;
-  }
-
   if (!editor) return;
 
   const model = editor.getModel();
   const content = model.getValue();
   const lines = content.split('\n');
+  const referenceCount = Math.max(0, countSymbolReferences(lines, name) - 1);
+  const referenceMessage = referenceCount > 0
+    ? ` It still has ${referenceCount} grammar reference(s), which may become undefined.`
+    : '';
+
+  if (!confirm(`Are you sure you want to delete "${name}"?${referenceMessage}`)) {
+    return;
+  }
 
   if (type === 'token') {
     // Remove from token declaration
@@ -943,6 +1023,7 @@ function openRuleModal(lineNumber = null, lhs = '', rhs = []) {
   modalTitle.textContent = lineNumber ? 'Edit Rule' : 'Add New Rule';
   ruleLHS.value = lhs;
   currentRuleSymbols = rhs.map(s => s.symbol || s);
+  ruleInsertPositionGroup.style.display = lineNumber ? 'none' : 'block';
   updateRHSDisplay();
   showModal(ruleModal, ruleLHS);
 }
@@ -955,6 +1036,7 @@ function closeRuleModal() {
   ruleForm.reset();
   currentRuleSymbols = [];
   editingLineNumber = null;
+  ruleInsertPositionGroup.style.display = 'block';
   updateRHSDisplay();
 }
 
@@ -1120,23 +1202,18 @@ function handleSaveRule(event) {
         ruleText.trim()
       );
     } else {
-      // Add new rule
-      // Add after %%
       const lines = currentContent.split('\n');
-      let insertIndex = lines.findIndex(line => line.trim() === '%%');
+      const insertionPoint = getRuleInsertionPoint(lines);
 
-      if (insertIndex !== -1) {
-        // If there is an empty line after %%, insert after it
-        insertIndex += 2;
+      if (insertionPoint) {
         insertEditorText(
-          insertIndex + 1,
-          1,
+          insertionPoint.lineNumber,
+          insertionPoint.column,
           `\n${ruleText}\n`
         );
 
-        // Move cursor to newly added line
-        editor.setPosition({ lineNumber: insertIndex + 2, column: 1 });
-        editor.revealLineInCenter(insertIndex + 2);
+        editor.setPosition({ lineNumber: insertionPoint.revealLineNumber, column: 1 });
+        editor.revealLineInCenter(insertionPoint.revealLineNumber);
       } else {
         // Add to end if %% not found
         replaceEditorContent(`${currentContent}\n\n%%\n\n${ruleText}`);
@@ -1160,6 +1237,9 @@ function handleSaveRule(event) {
  * Keyboard shortcut handler
  */
 function handleKeyboardShortcuts(event) {
+  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+  const modKey = isMac ? event.metaKey : event.ctrlKey;
+
   const activeModal = getActiveModal();
   if (activeModal) {
     if (event.key === 'Escape') {
@@ -1175,8 +1255,11 @@ function handleKeyboardShortcuts(event) {
     return;
   }
 
-  const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  const modKey = isMac ? event.metaKey : event.ctrlKey;
+  if (modKey && event.shiftKey && event.key.toLowerCase() === 'p') {
+    event.preventDefault();
+    openCommandPalette();
+    return;
+  }
 
   // Ctrl/Cmd + Enter: Parse
   if (modKey && event.key === 'Enter' && !event.shiftKey) {
@@ -3021,6 +3104,91 @@ function handleResetVM() {
   updateStatus('Ruby Wasm VM reset - it will initialize on the next Parse or Validate', 'ready');
 }
 
+function formatSelection() {
+  if (!editor) return;
+
+  const model = editor.getModel();
+  const selection = editor.getSelection();
+  if (!model || !selection) return;
+
+  const startLine = selection.startLineNumber;
+  const endLine = selection.isEmpty() ? selection.startLineNumber : selection.endLineNumber;
+  const lines = [];
+  for (let lineNumber = startLine; lineNumber <= endLine; lineNumber += 1) {
+    lines.push(model.getLineContent(lineNumber).replace(/\s+$/g, ''));
+  }
+
+  replaceEditorLineRange(startLine, endLine, lines.join('\n'), 'format-selection');
+  updateStatus('Selection formatted', 'ready');
+}
+
+function jumpToSymbol() {
+  if (!editor) return;
+
+  const symbol = prompt('Symbol name');
+  if (!symbol) return;
+
+  const grammar = latestParseResult?.grammar;
+  const rule = grammar?.rules?.find(item => item.lhs === symbol && item.line_number);
+  if (rule) {
+    editor.setPosition({ lineNumber: rule.line_number, column: 1 });
+    editor.revealLineInCenter(rule.line_number);
+    editor.focus();
+    return;
+  }
+
+  const match = editor.getModel()?.findNextMatch(symbol, { lineNumber: 1, column: 1 }, false, true, null, true);
+  if (match) {
+    editor.setSelection(match.range);
+    editor.revealRangeInCenter(match.range);
+    editor.focus();
+  }
+}
+
+function getCommands() {
+  return [
+    { id: 'parse', label: 'Parse', run: handleParse, disabled: parseBtn.disabled },
+    { id: 'validate', label: 'Validate', run: handleValidate, disabled: validateBtn.disabled },
+    { id: 'reset-vm', label: 'Reset VM', run: handleResetVM, disabled: resetVmBtn.disabled },
+    { id: 'export', label: 'Export Report', run: handleExport, disabled: exportBtn.disabled },
+    { id: 'download', label: 'Download .y', run: handleDownload, disabled: downloadBtn.disabled },
+    { id: 'upload', label: 'Upload File', run: handleUpload, disabled: uploadBtn.disabled },
+    { id: 'theme', label: 'Toggle Theme', run: toggleTheme },
+    { id: 'jump-symbol', label: 'Jump to Symbol', run: jumpToSymbol },
+    { id: 'format-selection', label: 'Format Selection', run: formatSelection },
+  ];
+}
+
+function renderCommandPalette() {
+  const query = commandInput.value.trim().toLowerCase();
+  commandList.replaceChildren();
+
+  getCommands()
+    .filter(command => command.label.toLowerCase().includes(query))
+    .forEach(command => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'command-item';
+      button.textContent = command.label;
+      button.disabled = Boolean(command.disabled);
+      button.addEventListener('click', () => {
+        closeCommandPalette();
+        command.run();
+      });
+      commandList.appendChild(button);
+    });
+}
+
+function openCommandPalette() {
+  commandInput.value = '';
+  renderCommandPalette();
+  showModal(commandPalette, commandInput);
+}
+
+function closeCommandPalette() {
+  hideModal(commandPalette);
+}
+
 /**
  * Report export handler
  */
@@ -3465,6 +3633,7 @@ async function init() {
     themeToggle.addEventListener('click', toggleTheme);
     undoBtn.addEventListener('click', handleUndo);
     redoBtn.addEventListener('click', handleRedo);
+    autoParseToggle.addEventListener('change', scheduleAutoParse);
 
     // Symbol modal event listeners
     symbolModalClose.addEventListener('click', () => closeSymbolModal(true));
@@ -3510,6 +3679,21 @@ async function init() {
     symbolTypeModal.addEventListener('click', (e) => {
       if (e.target === symbolTypeModal) {
         closeSymbolTypeModal();
+      }
+    });
+
+    commandPaletteClose.addEventListener('click', closeCommandPalette);
+    commandInput.addEventListener('input', renderCommandPalette);
+    commandInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      const firstCommand = commandList.querySelector('.command-item:not(:disabled)');
+      if (!firstCommand) return;
+      event.preventDefault();
+      firstCommand.click();
+    });
+    commandPalette.addEventListener('click', (event) => {
+      if (event.target === commandPalette) {
+        closeCommandPalette();
       }
     });
 

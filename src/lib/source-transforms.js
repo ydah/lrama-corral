@@ -35,6 +35,170 @@ export function replaceSymbolInText(text, oldName, newName) {
   return text.replace(pattern, (_match, prefix) => `${prefix}${newName}`);
 }
 
+function symbolBoundaryMatches(text, index, symbol) {
+  if (text.slice(index, index + symbol.length) !== symbol) return false;
+  if (!IDENTIFIER_RE.test(symbol)) return true;
+
+  const before = text[index - 1] || '';
+  const after = text[index + symbol.length] || '';
+  return !/[A-Za-z0-9_]/.test(before) && !/[A-Za-z0-9_]/.test(after);
+}
+
+function transformGrammarLine(line, symbol, replacement, state, countOnly = false) {
+  let output = '';
+  let count = 0;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+
+    if (state.lineComment) {
+      output += char;
+      continue;
+    }
+
+    if (state.blockComment) {
+      if (char === '*' && next === '/') {
+        state.blockComment = false;
+        output += '*/';
+        index += 1;
+      } else {
+        output += char;
+      }
+      continue;
+    }
+
+    if (state.singleQuote || state.doubleQuote) {
+      output += char;
+      if (state.escaped) {
+        state.escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        state.escaped = true;
+        continue;
+      }
+      if (state.singleQuote && char === "'") {
+        state.singleQuote = false;
+      } else if (state.doubleQuote && char === '"') {
+        state.doubleQuote = false;
+      }
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      state.blockComment = true;
+      output += '/*';
+      index += 1;
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      state.lineComment = true;
+      output += '//';
+      index += 1;
+      continue;
+    }
+
+    if (char === "'") {
+      state.singleQuote = true;
+      output += char;
+      continue;
+    }
+
+    if (char === '"') {
+      state.doubleQuote = true;
+      output += char;
+      continue;
+    }
+
+    if (char === '{') {
+      state.actionDepth += 1;
+      output += char;
+      continue;
+    }
+
+    if (char === '}' && state.actionDepth > 0) {
+      state.actionDepth -= 1;
+      output += char;
+      continue;
+    }
+
+    if (state.actionDepth === 0 && symbolBoundaryMatches(line, index, symbol)) {
+      count += 1;
+      output += countOnly ? line.slice(index, index + symbol.length) : replacement;
+      index += symbol.length - 1;
+      continue;
+    }
+
+    output += char;
+  }
+
+  return { line: output, count };
+}
+
+export function countSymbolReferences(lines, symbol) {
+  if (!symbol) return 0;
+
+  const rulesEnd = findRulesSectionEnd(lines);
+  const maxLine = rulesEnd === -1 ? lines.length : rulesEnd;
+  const state = {
+    blockComment: false,
+    lineComment: false,
+    singleQuote: false,
+    doubleQuote: false,
+    actionDepth: 0,
+    escaped: false,
+    prologue: false,
+  };
+  let count = 0;
+
+  for (let index = 0; index < maxLine; index += 1) {
+    const line = lines[index];
+
+    if (line.includes('%{')) state.prologue = true;
+    if (!state.prologue) {
+      state.lineComment = false;
+      count += transformGrammarLine(line, symbol, symbol, state, true).count;
+    }
+    if (line.includes('%}')) state.prologue = false;
+  }
+
+  return count;
+}
+
+export function renameSymbolEverywhere(lines, oldName, newName) {
+  if (!oldName || oldName === newName) return 0;
+
+  const rulesEnd = findRulesSectionEnd(lines);
+  const maxLine = rulesEnd === -1 ? lines.length : rulesEnd;
+  const state = {
+    blockComment: false,
+    lineComment: false,
+    singleQuote: false,
+    doubleQuote: false,
+    actionDepth: 0,
+    escaped: false,
+    prologue: false,
+  };
+  let count = 0;
+
+  for (let index = 0; index < maxLine; index += 1) {
+    const line = lines[index];
+
+    if (line.includes('%{')) state.prologue = true;
+    if (!state.prologue) {
+      state.lineComment = false;
+      const result = transformGrammarLine(line, oldName, newName, state);
+      lines[index] = result.line;
+      count += result.count;
+    }
+    if (line.includes('%}')) state.prologue = false;
+  }
+
+  return count;
+}
+
 export function removeSymbolFromDeclarationLine(line, name) {
   const escaped = escapeRegExp(name);
   const pattern = IDENTIFIER_RE.test(name)
