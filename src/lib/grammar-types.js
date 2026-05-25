@@ -36,6 +36,26 @@
  */
 
 /**
+ * @typedef {Object} GrammarMetadata
+ * @property {string} [lrama_version]
+ * @property {string} [ruby_engine]
+ * @property {string} [ruby_version]
+ */
+
+/**
+ * @typedef {Object} AnalysisWarning
+ * @property {string} phase
+ * @property {string} message
+ */
+
+/**
+ * @typedef {Object} ConflictExpectation
+ * @property {number} actual
+ * @property {number|null} expected
+ * @property {boolean|null} satisfied
+ */
+
+/**
  * @typedef {Object} GrammarConflict
  * @property {'shift_reduce'|'reduce_reduce'|string} type
  * @property {number} state
@@ -76,6 +96,11 @@
  * @property {Record<string, string[]>} follow_sets
  * @property {GrammarConflict[]} conflicts
  * @property {ResolvedGrammarConflict[]} resolved_conflicts
+ * @property {{shift_reduce?: ConflictExpectation, reduce_reduce?: ConflictExpectation}} [expectations]
+ * @property {string[]} [nullable_symbols]
+ * @property {Record<string, string[]>} [lint]
+ * @property {GrammarMetadata} [metadata]
+ * @property {AnalysisWarning[]} [analysis_warnings]
  * @property {StateTransition[]} state_transitions
  * @property {Record<string, string>} syntax_diagrams
  */
