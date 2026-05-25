@@ -17,6 +17,8 @@ import { parseSanitizedSvg } from './lib/svg-sanitizer.js';
 import * as monaco from 'monaco-editor';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 
+/** @typedef {import('./lib/grammar-types.js').GrammarResult} GrammarResult */
+
 self.MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
 };
@@ -1372,6 +1374,8 @@ function showResult(title, data) {
 
 /**
  * Display structured parse result
+ * @param {GrammarResult} data
+ * @param {GrammarResult|null} previousResult
  */
 function showStructuredResult(data, previousResult = null) {
   if (!data.success || !data.grammar) {
@@ -2366,6 +2370,7 @@ function createSymbolSection(title, items, headers, symbolType, originalData) {
 
   const addBtn = document.createElement('button');
   addBtn.textContent = `+ Add ${symbolType === 'token' ? 'Token' : 'Nonterminal'}`;
+  addBtn.setAttribute('aria-label', `Add ${symbolType === 'token' ? 'token' : 'nonterminal'}`);
   addBtn.className = 'secondary';
   addBtn.style.padding = '6px 12px';
   addBtn.style.fontSize = '12px';
@@ -2547,6 +2552,7 @@ function createRulesCardView(rules) {
     const editBtn = document.createElement('button');
     editBtn.className = 'secondary';
     editBtn.textContent = '✏️ Edit';
+    editBtn.setAttribute('aria-label', `Edit rule ${rule.id}`);
     editBtn.addEventListener('click', (e) => {
       e.stopPropagation(); // Prevent card click event
       openRuleModal(rule.line_number, rule.lhs, rule.rhs || []);
@@ -2605,6 +2611,7 @@ function createStateTransitionSection(stateTransitions) {
 
   const svgExportBtn = document.createElement('button');
   svgExportBtn.textContent = 'Export SVG';
+  svgExportBtn.setAttribute('aria-label', 'Export state transition diagram as SVG');
   svgExportBtn.className = 'secondary';
   svgExportBtn.style.padding = '6px 12px';
   svgExportBtn.style.fontSize = '12px';
@@ -2612,6 +2619,7 @@ function createStateTransitionSection(stateTransitions) {
 
   const pngExportBtn = document.createElement('button');
   pngExportBtn.textContent = 'Export PNG';
+  pngExportBtn.setAttribute('aria-label', 'Export state transition diagram as PNG');
   pngExportBtn.className = 'secondary';
   pngExportBtn.style.padding = '6px 12px';
   pngExportBtn.style.fontSize = '12px';
@@ -2619,6 +2627,7 @@ function createStateTransitionSection(stateTransitions) {
 
   const zoomOutBtn = document.createElement('button');
   zoomOutBtn.textContent = 'Zoom Out';
+  zoomOutBtn.setAttribute('aria-label', 'Zoom out state transition diagram');
   zoomOutBtn.className = 'secondary';
   zoomOutBtn.style.padding = '6px 12px';
   zoomOutBtn.style.fontSize = '12px';
@@ -2626,6 +2635,7 @@ function createStateTransitionSection(stateTransitions) {
 
   const zoomInBtn = document.createElement('button');
   zoomInBtn.textContent = 'Zoom In';
+  zoomInBtn.setAttribute('aria-label', 'Zoom in state transition diagram');
   zoomInBtn.className = 'secondary';
   zoomInBtn.style.padding = '6px 12px';
   zoomInBtn.style.fontSize = '12px';
@@ -2633,6 +2643,7 @@ function createStateTransitionSection(stateTransitions) {
 
   const fitBtn = document.createElement('button');
   fitBtn.textContent = 'Fit';
+  fitBtn.setAttribute('aria-label', 'Fit state transition diagram');
   fitBtn.className = 'secondary';
   fitBtn.style.padding = '6px 12px';
   fitBtn.style.fontSize = '12px';
@@ -3087,6 +3098,7 @@ function createStateDetailsTable(stateTransitions) {
   expandAllBtn.type = 'button';
   expandAllBtn.className = 'secondary';
   expandAllBtn.textContent = 'Expand All';
+  expandAllBtn.setAttribute('aria-label', 'Expand all state details');
   expandAllBtn.style.padding = '4px 10px';
   expandAllBtn.style.fontSize = '12px';
   actions.appendChild(expandAllBtn);
@@ -3095,6 +3107,7 @@ function createStateDetailsTable(stateTransitions) {
   collapseAllBtn.type = 'button';
   collapseAllBtn.className = 'secondary';
   collapseAllBtn.textContent = 'Collapse All';
+  collapseAllBtn.setAttribute('aria-label', 'Collapse all state details');
   collapseAllBtn.style.padding = '4px 10px';
   collapseAllBtn.style.fontSize = '12px';
   actions.appendChild(collapseAllBtn);
@@ -3385,6 +3398,7 @@ function createSyntaxDiagramsSection(syntaxDiagrams) {
 
     const svgExportBtn = document.createElement('button');
     svgExportBtn.textContent = 'SVG';
+    svgExportBtn.setAttribute('aria-label', `Export ${symbol} syntax diagram as SVG`);
     svgExportBtn.className = 'secondary';
     svgExportBtn.style.padding = '4px 10px';
     svgExportBtn.style.fontSize = '12px';
@@ -3393,6 +3407,7 @@ function createSyntaxDiagramsSection(syntaxDiagrams) {
 
     const pngExportBtn = document.createElement('button');
     pngExportBtn.textContent = 'PNG';
+    pngExportBtn.setAttribute('aria-label', `Export ${symbol} syntax diagram as PNG`);
     pngExportBtn.className = 'secondary';
     pngExportBtn.style.padding = '4px 10px';
     pngExportBtn.style.fontSize = '12px';
@@ -3512,6 +3527,7 @@ function createRulesSection(rules) {
 
   const cardViewBtn = document.createElement('button');
   cardViewBtn.textContent = '📋 Card View';
+  cardViewBtn.setAttribute('aria-label', 'Show rules as cards');
   cardViewBtn.className = rulesViewMode === 'card' ? 'active' : '';
   cardViewBtn.addEventListener('click', () => {
     rulesViewMode = 'card';
@@ -3531,6 +3547,7 @@ function createRulesSection(rules) {
 
   const terminalViewBtn = document.createElement('button');
   terminalViewBtn.textContent = '💻 Terminal View';
+  terminalViewBtn.setAttribute('aria-label', 'Show rules as terminal text');
   terminalViewBtn.className = rulesViewMode === 'terminal' ? 'active' : '';
   terminalViewBtn.addEventListener('click', () => {
     rulesViewMode = 'terminal';
@@ -3897,6 +3914,7 @@ function renderCommandPalette() {
       button.type = 'button';
       button.className = 'command-item';
       button.textContent = command.label;
+      button.setAttribute('aria-label', command.label);
       button.disabled = Boolean(command.disabled);
       button.addEventListener('click', () => {
         closeCommandPalette();

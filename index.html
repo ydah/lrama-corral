@@ -65,13 +65,13 @@
       </div>
 
       <div class="button-group">
-        <button id="parseBtn" disabled>Parse</button>
-        <button id="validateBtn" class="secondary" disabled>Validate</button>
-        <button id="resetVmBtn" class="secondary" disabled>Reset VM</button>
+        <button id="parseBtn" aria-label="Parse grammar" disabled>Parse</button>
+        <button id="validateBtn" class="secondary" aria-label="Validate grammar" disabled>Validate</button>
+        <button id="resetVmBtn" class="secondary" aria-label="Reset Ruby Wasm VM" disabled>Reset VM</button>
         <input type="file" id="fileInput" accept=".y,.yacc,.yy" style="display: none;">
-        <button id="uploadBtn" class="secondary" disabled>Upload File</button>
-        <button id="downloadBtn" class="secondary" disabled>Download .y</button>
-        <button id="exportBtn" class="secondary" disabled>Export Report</button>
+        <button id="uploadBtn" class="secondary" aria-label="Upload grammar file" disabled>Upload File</button>
+        <button id="downloadBtn" class="secondary" aria-label="Download grammar file" disabled>Download .y</button>
+        <button id="exportBtn" class="secondary" aria-label="Export HTML report" disabled>Export Report</button>
         <button id="undoBtn" class="secondary" disabled title="Undo (Ctrl/Cmd+Z)" aria-label="Undo">↶ Undo</button>
         <button id="redoBtn" class="secondary" disabled title="Redo (Ctrl/Cmd+Shift+Z)" aria-label="Redo">↷ Redo</button>
         <label class="inline-control" for="autoParseToggle">
@@ -112,8 +112,8 @@
         </div>
 
         <div class="modal-actions">
-          <button type="button" id="symbolModalCancel" class="secondary">Cancel</button>
-          <button type="submit" id="symbolModalSave">Save Symbol</button>
+          <button type="button" id="symbolModalCancel" class="secondary" aria-label="Cancel symbol edit">Cancel</button>
+          <button type="submit" id="symbolModalSave" aria-label="Save symbol">Save Symbol</button>
         </div>
       </form>
     </div>
@@ -137,16 +137,16 @@
       </div>
 
       <div style="display: flex; flex-direction: column; gap: 10px;">
-        <button id="registerAsTokenBtn" class="secondary" style="padding: 15px; font-size: 15px;">
+        <button id="registerAsTokenBtn" class="secondary" style="padding: 15px; font-size: 15px;" aria-label="Register symbol as token">
           📝 Register as Token
         </button>
-        <button id="registerAsNonterminalBtn" class="secondary" style="padding: 15px; font-size: 15px;">
+        <button id="registerAsNonterminalBtn" class="secondary" style="padding: 15px; font-size: 15px;" aria-label="Register symbol as nonterminal">
           🔤 Register as Nonterminal
         </button>
       </div>
 
       <div class="modal-actions">
-        <button type="button" id="symbolTypeModalCancel" class="secondary">Cancel</button>
+        <button type="button" id="symbolTypeModalCancel" class="secondary" aria-label="Cancel symbol registration">Cancel</button>
       </div>
     </div>
   </div>
@@ -170,7 +170,7 @@
           <div class="symbols-list" id="rhsSymbols"></div>
           <div class="symbol-input-group">
             <input type="text" id="symbolInput" placeholder="Add symbol (e.g., term, PLUS)" autocomplete="off">
-            <button type="button" id="addSymbolBtn" class="secondary">Add Symbol</button>
+            <button type="button" id="addSymbolBtn" class="secondary" aria-label="Add RHS symbol">Add Symbol</button>
           </div>
         </div>
 
@@ -184,8 +184,8 @@
         </div>
 
         <div class="modal-actions">
-          <button type="button" id="modalCancel" class="secondary">Cancel</button>
-          <button type="submit" id="modalSave">Save Rule</button>
+          <button type="button" id="modalCancel" class="secondary" aria-label="Cancel rule edit">Cancel</button>
+          <button type="submit" id="modalSave" aria-label="Save rule">Save Rule</button>
         </div>
       </form>
     </div>
