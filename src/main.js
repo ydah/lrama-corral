@@ -1,5 +1,10 @@
 import { lramaBridge } from './lib/lrama-bridge.js';
 import './styles.css';
+import {
+  clearParseState,
+  createAppState,
+  invalidateParserRequests,
+} from './lib/app-state.js';
 import { createLifecycle } from './lib/lifecycle.js';
 import {
   appendCollapsibleJsonResult,
@@ -99,27 +104,6 @@ let editor = null;
 // Theme state
 let isDarkMode = false;
 
-// View state for rules
-let rulesViewMode = 'card'; // 'card' or 'terminal'
-
-// Rule editing state
-let currentRuleSymbols = [];
-let editingLineNumber = null;
-
-// Symbol editing state
-let editingSymbolType = null; // 'token' or 'nonterminal'
-let editingSymbolIndex = null;
-let editingSymbolOriginalName = null;
-
-// Pending symbol to add to rule after registration
-let pendingSymbolToAdd = null;
-
-// Latest parse result for export
-let latestParseResult = null;
-let latestParsedSource = '';
-let parseRequestId = 0;
-let validateRequestId = 0;
-
 // File and draft state
 const DRAFT_STORAGE_KEY = 'lrama-corral:draft';
 const THEME_STORAGE_KEY = 'lrama-corral:theme';
@@ -135,20 +119,19 @@ const STATE_GRAPH_COLORS = {
   goto: '#3498db',
   reduce: '#f39c12',
 };
-let currentFileName = DEFAULT_DOWNLOAD_FILENAME;
-let isDirty = false;
 let draftSaveTimer = null;
 let autoParseTimer = null;
-let svgIdCounter = 0;
-let mobileViewMode = 'editor';
 const appLifecycle = createLifecycle();
+const appState = createAppState({
+  currentFileName: DEFAULT_DOWNLOAD_FILENAME,
+});
 
 /**
  * Initialize Monaco Editor
  */
 function initMonacoEditor() {
   registerYaccLanguage(monaco, {
-    getGrammar: () => latestParseResult?.grammar,
+    getGrammar: () => appState.latestParseResult?.grammar,
   });
 
   const defaultValue = `%token NUMBER
@@ -174,8 +157,8 @@ factor: NUMBER
   const draft = loadDraft();
   const initialValue = draft?.content || defaultValue;
   if (draft?.fileName) {
-    currentFileName = draft.fileName;
-    isDirty = true;
+    appState.currentFileName = draft.fileName;
+    appState.isDirty = true;
   }
 
   editor = monaco.editor.create(editorContainer, {
@@ -200,7 +183,7 @@ factor: NUMBER
     invalidateParseResult();
     scheduleDraftSave();
     scheduleAutoParse();
-    isDirty = true;
+    appState.isDirty = true;
   }));
   appLifecycle.add(() => editor?.dispose());
 
@@ -304,7 +287,7 @@ function scheduleDraftSave() {
     const content = editor.getValue();
     writeStorage(DRAFT_STORAGE_KEY, JSON.stringify({
       content,
-      fileName: currentFileName,
+      fileName: appState.currentFileName,
       updatedAt: new Date().toISOString(),
     }));
   }, 300);
@@ -404,34 +387,33 @@ function getRuleInsertionPoint(lines) {
 }
 
 function invalidateParseResult() {
-  if (!latestParseResult) return;
+  if (!appState.latestParseResult) return;
 
-  latestParseResult = null;
-  latestParsedSource = '';
+  clearParseState(appState);
   exportBtn.disabled = true;
   setParseMarkers([]);
   updateStatus('Grammar changed - run Parse again before exporting', 'loading');
 }
 
 function markContentClean() {
-  isDirty = false;
+  appState.isDirty = false;
 }
 
 function confirmDiscardDirtyContent() {
-  if (!isDirty) return true;
+  if (!appState.isDirty) return true;
   return confirm('Current edits will be replaced. Continue?');
 }
 
 function setMobileView(mode) {
-  mobileViewMode = mode === 'output' ? 'output' : 'editor';
-  document.body.dataset.mobileView = mobileViewMode;
+  appState.mobileViewMode = mode === 'output' ? 'output' : 'editor';
+  document.body.dataset.mobileView = appState.mobileViewMode;
 
-  mobileEditorTab.setAttribute('aria-selected', String(mobileViewMode === 'editor'));
-  mobileOutputTab.setAttribute('aria-selected', String(mobileViewMode === 'output'));
-  mobileEditorTab.classList.toggle('active', mobileViewMode === 'editor');
-  mobileOutputTab.classList.toggle('active', mobileViewMode === 'output');
+  mobileEditorTab.setAttribute('aria-selected', String(appState.mobileViewMode === 'editor'));
+  mobileOutputTab.setAttribute('aria-selected', String(appState.mobileViewMode === 'output'));
+  mobileEditorTab.classList.toggle('active', appState.mobileViewMode === 'editor');
+  mobileOutputTab.classList.toggle('active', appState.mobileViewMode === 'output');
 
-  if (mobileViewMode === 'editor') {
+  if (appState.mobileViewMode === 'editor') {
     editor?.layout();
   }
 }
@@ -455,7 +437,7 @@ function validateGrammarFile(file) {
 }
 
 function findRuleById(ruleId) {
-  return latestParseResult?.grammar?.rules?.find(rule => rule.id === ruleId);
+  return appState.latestParseResult?.grammar?.rules?.find(rule => rule.id === ruleId);
 }
 
 function jumpToRuleById(ruleId) {
@@ -558,9 +540,9 @@ function trapModalFocus(event, modal) {
  * Open symbol modal
  */
 function openSymbolModal(type, index = null, symbolData = {}) {
-  editingSymbolType = type;
-  editingSymbolIndex = index;
-  editingSymbolOriginalName = symbolData.name || null;
+  appState.editingSymbolType = type;
+  appState.editingSymbolIndex = index;
+  appState.editingSymbolOriginalName = symbolData.name || null;
 
   // Set title
   if (index === null) {
@@ -591,13 +573,13 @@ function openSymbolModal(type, index = null, symbolData = {}) {
 function closeSymbolModal(clearPending = false) {
   hideModal(symbolModal);
   symbolForm.reset();
-  editingSymbolType = null;
-  editingSymbolIndex = null;
-  editingSymbolOriginalName = null;
+  appState.editingSymbolType = null;
+  appState.editingSymbolIndex = null;
+  appState.editingSymbolOriginalName = null;
 
   // Clear pending symbol if modal was cancelled (not saved)
-  if (clearPending && pendingSymbolToAdd) {
-    pendingSymbolToAdd = null;
+  if (clearPending && appState.pendingSymbolToAdd) {
+    appState.pendingSymbolToAdd = null;
     // Re-focus on symbol input if rule modal is still open
     if (ruleModal.classList.contains('active')) {
       symbolInput.focus();
@@ -631,7 +613,7 @@ function handleSaveSymbol(event) {
     return;
   }
 
-  const oldName = editingSymbolOriginalName;
+  const oldName = appState.editingSymbolOriginalName;
   if (oldName && oldName !== name) {
     const referenceCount = countSymbolReferences(lines, oldName);
     const confirmed = confirm(
@@ -640,7 +622,7 @@ function handleSaveSymbol(event) {
     if (!confirmed) return;
   }
 
-  if (editingSymbolType === 'token') {
+  if (appState.editingSymbolType === 'token') {
     // Add/edit token
     updateTokenDeclaration(lines, name, typeValue, tokenIdValue);
   } else {
@@ -662,10 +644,10 @@ function handleSaveSymbol(event) {
     if (!parseBtn.disabled) {
       handleParse().then(() => {
         // After parse completes, add pending symbol to rule if needed
-        if (pendingSymbolToAdd) {
-          currentRuleSymbols.push(pendingSymbolToAdd);
+        if (appState.pendingSymbolToAdd) {
+          appState.currentRuleSymbols.push(appState.pendingSymbolToAdd);
           updateRHSDisplay();
-          pendingSymbolToAdd = null;
+          appState.pendingSymbolToAdd = null;
           symbolInput.focus();
         }
       });
@@ -677,7 +659,7 @@ function handleSaveSymbol(event) {
  * Update token declaration
  */
 function updateTokenDeclaration(lines, name, type, tokenIdValue) {
-  const oldName = editingSymbolOriginalName;
+  const oldName = appState.editingSymbolOriginalName;
   upsertTokenDeclaration(lines, name, type, tokenIdValue, oldName);
 }
 
@@ -685,7 +667,7 @@ function updateTokenDeclaration(lines, name, type, tokenIdValue) {
  * Update nonterminal declaration
  */
 function updateNonterminalDeclaration(lines, name, type) {
-  const oldName = editingSymbolOriginalName;
+  const oldName = appState.editingSymbolOriginalName;
   upsertNonterminalDeclaration(lines, name, type, oldName);
 }
 
@@ -748,10 +730,10 @@ function handleDeleteSymbol(type, symbolData) {
  * Open modal
  */
 function openRuleModal(lineNumber = null, lhs = '', rhs = []) {
-  editingLineNumber = lineNumber;
+  appState.editingLineNumber = lineNumber;
   modalTitle.textContent = lineNumber ? 'Edit Rule' : 'Add New Rule';
   ruleLHS.value = lhs;
-  currentRuleSymbols = rhs.map(s => s.symbol || s);
+  appState.currentRuleSymbols = rhs.map(s => s.symbol || s);
   ruleInsertPositionGroup.style.display = lineNumber ? 'none' : 'block';
   updateRHSDisplay();
   showModal(ruleModal, ruleLHS);
@@ -763,8 +745,8 @@ function openRuleModal(lineNumber = null, lhs = '', rhs = []) {
 function closeRuleModal() {
   hideModal(ruleModal);
   ruleForm.reset();
-  currentRuleSymbols = [];
-  editingLineNumber = null;
+  appState.currentRuleSymbols = [];
+  appState.editingLineNumber = null;
   ruleInsertPositionGroup.style.display = 'block';
   updateRHSDisplay();
 }
@@ -775,7 +757,7 @@ function closeRuleModal() {
 function updateRHSDisplay() {
   rhsSymbols.innerHTML = '';
 
-  if (currentRuleSymbols.length === 0) {
+  if (appState.currentRuleSymbols.length === 0) {
     const emptyMsg = document.createElement('div');
     emptyMsg.textContent = 'No symbols yet (empty rule)';
     emptyMsg.style.color = 'var(--text-secondary)';
@@ -784,7 +766,7 @@ function updateRHSDisplay() {
     return;
   }
 
-  currentRuleSymbols.forEach((symbol, index) => {
+  appState.currentRuleSymbols.forEach((symbol, index) => {
     const tag = document.createElement('div');
     tag.className = 'symbol-tag';
 
@@ -796,7 +778,7 @@ function updateRHSDisplay() {
     removeBtn.textContent = '×';
     removeBtn.setAttribute('aria-label', `Remove ${symbol}`);
     removeBtn.addEventListener('click', () => {
-      currentRuleSymbols.splice(index, 1);
+      appState.currentRuleSymbols.splice(index, 1);
       updateRHSDisplay();
     });
     tag.appendChild(removeBtn);
@@ -817,13 +799,13 @@ function handleAddSymbol() {
 
   if (isDefined) {
     // Add to current rule symbols
-    currentRuleSymbols.push(symbol);
+    appState.currentRuleSymbols.push(symbol);
     updateRHSDisplay();
     symbolInput.value = '';
     symbolInput.focus();
   } else {
     // Symbol is undefined - prompt user to register it
-    pendingSymbolToAdd = symbol;
+    appState.pendingSymbolToAdd = symbol;
     symbolInput.value = '';
     openSymbolTypeModal(symbol);
   }
@@ -833,12 +815,12 @@ function handleAddSymbol() {
  * Check if symbol is defined in current grammar
  */
 function isSymbolDefined(symbolName) {
-  if (!latestParseResult || !latestParseResult.grammar) {
+  if (!appState.latestParseResult || !appState.latestParseResult.grammar) {
     // No parse result - allow any symbol
     return true;
   }
 
-  const grammar = latestParseResult.grammar;
+  const grammar = appState.latestParseResult.grammar;
 
   // Check in tokens
   if (grammar.tokens && grammar.tokens.some(t => t.name === symbolName)) {
@@ -867,8 +849,8 @@ function openSymbolTypeModal(symbol) {
 function closeSymbolTypeModal(clearPending = true) {
   hideModal(symbolTypeModal);
   // Clear pending symbol if cancelled
-  if (clearPending && pendingSymbolToAdd) {
-    pendingSymbolToAdd = null;
+  if (clearPending && appState.pendingSymbolToAdd) {
+    appState.pendingSymbolToAdd = null;
     // Re-focus on symbol input if rule modal is still open
     if (ruleModal.classList.contains('active')) {
       symbolInput.focus();
@@ -880,9 +862,9 @@ function closeSymbolTypeModal(clearPending = true) {
  * Handle register as token button
  */
 function handleRegisterAsToken() {
-  if (pendingSymbolToAdd) {
+  if (appState.pendingSymbolToAdd) {
     closeSymbolTypeModal(false); // Don't clear pending symbol
-    openSymbolModal('token', null, { name: pendingSymbolToAdd });
+    openSymbolModal('token', null, { name: appState.pendingSymbolToAdd });
   }
 }
 
@@ -890,9 +872,9 @@ function handleRegisterAsToken() {
  * Handle register as nonterminal button
  */
 function handleRegisterAsNonterminal() {
-  if (pendingSymbolToAdd) {
+  if (appState.pendingSymbolToAdd) {
     closeSymbolTypeModal(false); // Don't clear pending symbol
-    openSymbolModal('nonterminal', null, { name: pendingSymbolToAdd });
+    openSymbolModal('nonterminal', null, { name: appState.pendingSymbolToAdd });
   }
 }
 
@@ -909,8 +891,8 @@ function handleSaveRule(event) {
   }
 
   // Convert rule to string
-  const rhs = currentRuleSymbols.length > 0
-    ? currentRuleSymbols.join(' ')
+  const rhs = appState.currentRuleSymbols.length > 0
+    ? appState.currentRuleSymbols.join(' ')
     : '/* empty */';
   const ruleText = `${lhs}: ${rhs}\n    ;\n`;
 
@@ -919,10 +901,10 @@ function handleSaveRule(event) {
     const model = editor.getModel();
     const currentContent = model.getValue();
 
-    if (editingLineNumber) {
+    if (appState.editingLineNumber) {
       // Edit existing rule
       const lines = currentContent.split('\n');
-      let ruleStart = editingLineNumber - 1;
+      let ruleStart = appState.editingLineNumber - 1;
       let ruleEnd = findRuleEndLine(lines, ruleStart);
 
       replaceEditorLineRange(
@@ -1962,7 +1944,7 @@ function createDependencyGraph(nonterminals, edges, ruleLineByLhs) {
   const centerY = height / 2;
   const radius = nonterminals.length === 1 ? 0 : Math.min(width, height) / 2 - 70;
   const nodeRadius = 22;
-  const markerId = `dependency-arrowhead-${svgIdCounter++}`;
+  const markerId = `dependency-arrowhead-${appState.svgIdCounter++}`;
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('width', width);
@@ -2571,7 +2553,7 @@ function createStateTransitionGraph(stateTransitions, options = {}) {
   const width = 1200;
   const height = Math.max(600, stateTransitions.length * 80);
   const nodeRadius = 30;
-  const markerId = `state-arrowhead-${svgIdCounter++}`;
+  const markerId = `state-arrowhead-${appState.svgIdCounter++}`;
 
   // Create SVG element
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -3362,11 +3344,11 @@ function createRulesSection(rules) {
   const cardViewBtn = document.createElement('button');
   cardViewBtn.textContent = '📋 Card View';
   cardViewBtn.setAttribute('aria-label', 'Show rules as cards');
-  cardViewBtn.className = rulesViewMode === 'card' ? 'active' : '';
+  cardViewBtn.className = appState.rulesViewMode === 'card' ? 'active' : '';
   cardViewBtn.addEventListener('click', () => {
-    rulesViewMode = 'card';
+    appState.rulesViewMode = 'card';
     // Re-render
-    const newContent = rulesViewMode === 'card'
+    const newContent = appState.rulesViewMode === 'card'
       ? createRulesCardView(rules)
       : createRulesTerminalView(rules);
 
@@ -3382,11 +3364,11 @@ function createRulesSection(rules) {
   const terminalViewBtn = document.createElement('button');
   terminalViewBtn.textContent = '💻 Terminal View';
   terminalViewBtn.setAttribute('aria-label', 'Show rules as terminal text');
-  terminalViewBtn.className = rulesViewMode === 'terminal' ? 'active' : '';
+  terminalViewBtn.className = appState.rulesViewMode === 'terminal' ? 'active' : '';
   terminalViewBtn.addEventListener('click', () => {
-    rulesViewMode = 'terminal';
+    appState.rulesViewMode = 'terminal';
     // Re-render
-    const newContent = rulesViewMode === 'card'
+    const newContent = appState.rulesViewMode === 'card'
       ? createRulesCardView(rules)
       : createRulesTerminalView(rules);
 
@@ -3406,7 +3388,7 @@ function createRulesSection(rules) {
   section.appendChild(headerDiv);
 
   // Display rules
-  const rulesContent = rulesViewMode === 'card'
+  const rulesContent = appState.rulesViewMode === 'card'
     ? createRulesCardView(rules)
     : createRulesTerminalView(rules);
   section.appendChild(rulesContent);
@@ -3542,8 +3524,8 @@ async function ensureLramaReady() {
 async function handleParse() {
   clearOutput();
   const source = editor.getValue().trim();
-  const requestId = ++parseRequestId;
-  const previousParseResult = latestParseResult;
+  const requestId = ++appState.parseRequestId;
+  const previousParseResult = appState.latestParseResult;
 
   if (!source) {
     showError('Input is empty. Please enter .y file content.');
@@ -3557,7 +3539,7 @@ async function handleParse() {
     updateStatus('Parsing...', 'loading');
 
     const result = await lramaBridge.parse(source);
-    if (requestId !== parseRequestId) return;
+    if (requestId !== appState.parseRequestId) return;
 
     if (result.success) {
       updateStatus('Parse successful', 'ready');
@@ -3566,8 +3548,8 @@ async function handleParse() {
       // Show new rule add button
       addRuleBtn.style.display = 'block';
       // Save parse result and enable export button
-      latestParseResult = result;
-      latestParsedSource = source;
+      appState.latestParseResult = result;
+      appState.latestParsedSource = source;
       exportBtn.disabled = false;
       setParseMarkers([]);
     } else {
@@ -3619,7 +3601,7 @@ async function handlePresetSelect(event) {
 
     const content = await response.text();
     replaceEditorContent(content);
-    currentFileName = `${preset}.y`;
+    appState.currentFileName = `${preset}.y`;
     markContentClean();
     clearOutput();
     updateStatus('Sample loaded', 'ready');
@@ -3639,7 +3621,7 @@ async function handlePresetSelect(event) {
 async function handleValidate() {
   clearOutput();
   const source = editor.getValue().trim();
-  const requestId = ++validateRequestId;
+  const requestId = ++appState.validateRequestId;
 
   if (!source) {
     showError('Input is empty. Please enter .y file content.');
@@ -3653,7 +3635,7 @@ async function handleValidate() {
     updateStatus('Validating...', 'loading');
 
     const result = await lramaBridge.validate(source);
-    if (requestId !== validateRequestId) return;
+    if (requestId !== appState.validateRequestId) return;
 
     if (result.valid) {
       updateStatus('Validation successful - Grammar is correct', 'ready');
@@ -3685,10 +3667,8 @@ async function handleValidate() {
 
 function handleResetVM() {
   lramaBridge.reset();
-  latestParseResult = null;
-  latestParsedSource = '';
-  parseRequestId += 1;
-  validateRequestId += 1;
+  clearParseState(appState);
+  invalidateParserRequests(appState);
   exportBtn.disabled = true;
   setParseMarkers([]);
   updateStatus('Ruby Wasm VM reset - it will initialize on the next Parse or Validate', 'ready');
@@ -3718,7 +3698,7 @@ function jumpToSymbol() {
   const symbol = prompt('Symbol name');
   if (!symbol) return;
 
-  const grammar = latestParseResult?.grammar;
+  const grammar = appState.latestParseResult?.grammar;
   const rule = grammar?.rules?.find(item => item.lhs === symbol && item.line_number);
   if (rule) {
     editor.setPosition({ lineNumber: rule.line_number, column: 1 });
@@ -3784,17 +3764,16 @@ function closeCommandPalette() {
  * Report export handler
  */
 function handleExport() {
-  if (!latestParseResult || !latestParseResult.grammar) {
+  if (!appState.latestParseResult || !appState.latestParseResult.grammar) {
     alert('No parse result available. Please run Parse first.');
     return;
   }
 
-  const grammar = latestParseResult.grammar;
+  const grammar = appState.latestParseResult.grammar;
   const source = editor.getValue();
-  if (source.trim() !== latestParsedSource) {
+  if (source.trim() !== appState.latestParsedSource) {
     alert('The grammar changed after the last successful parse. Please run Parse again before exporting.');
-    latestParseResult = null;
-    latestParsedSource = '';
+    clearParseState(appState);
     exportBtn.disabled = true;
     return;
   }
@@ -3809,7 +3788,7 @@ function handleExport() {
   // Create download link
   const a = document.createElement('a');
   a.href = url;
-  a.download = reportFileNameForGrammar(currentFileName);
+  a.download = reportFileNameForGrammar(appState.currentFileName);
   document.body.appendChild(a);
   a.click();
 
@@ -3838,7 +3817,7 @@ function handleDownload() {
   // Create download link
   const a = document.createElement('a');
   a.href = url;
-  a.download = currentFileName || DEFAULT_DOWNLOAD_FILENAME;
+  a.download = appState.currentFileName || DEFAULT_DOWNLOAD_FILENAME;
   document.body.appendChild(a);
   a.click();
 
@@ -3879,7 +3858,7 @@ async function handleFileSelect(event) {
   try {
     const content = await file.text();
     replaceEditorContent(content);
-    currentFileName = sanitizeDownloadFileName(file.name);
+    appState.currentFileName = sanitizeDownloadFileName(file.name);
     markContentClean();
     clearOutput();
     updateStatus(`File "${file.name}" loaded`, 'ready');
@@ -3931,7 +3910,7 @@ async function handleDrop(event) {
   try {
     const content = await file.text();
     replaceEditorContent(content);
-    currentFileName = sanitizeDownloadFileName(file.name);
+    appState.currentFileName = sanitizeDownloadFileName(file.name);
     markContentClean();
     clearOutput();
     updateStatus(`File "${file.name}" loaded`, 'ready');
@@ -3955,7 +3934,7 @@ async function init() {
     // Initialize Monaco Editor
     initMonacoEditor();
 
-    updateStatus(isDirty ? 'Draft restored - Click Parse button' : 'Ready - Click Parse button', 'ready');
+    updateStatus(appState.isDirty ? 'Draft restored - Click Parse button' : 'Ready - Click Parse button', 'ready');
 
     // Enable buttons
     parseBtn.disabled = false;
