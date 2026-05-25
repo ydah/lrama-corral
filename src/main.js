@@ -1,5 +1,6 @@
 import { lramaBridge } from './lib/lrama-bridge.js';
 import './styles.css';
+import { createLifecycle } from './lib/lifecycle.js';
 import { readStorage, writeStorage } from './lib/safe-storage.js';
 import { generateHTMLReport } from './lib/report-export.js';
 import { downloadPNG, downloadSVG } from './lib/svg-export.js';
@@ -128,6 +129,7 @@ let draftSaveTimer = null;
 let autoParseTimer = null;
 let svgIdCounter = 0;
 let mobileViewMode = 'editor';
+const appLifecycle = createLifecycle();
 
 /**
  * Yacc/Bison language definition for Monaco Editor
@@ -519,13 +521,14 @@ factor: NUMBER
   });
 
   // Update Undo/Redo button state when editor content changes
-  editor.onDidChangeModelContent(() => {
+  appLifecycle.addDisposable(editor.onDidChangeModelContent(() => {
     updateUndoRedoButtons();
     invalidateParseResult();
     scheduleDraftSave();
     scheduleAutoParse();
     isDirty = true;
-  });
+  }));
+  appLifecycle.add(() => editor?.dispose());
 
   // Update initial button state
   updateUndoRedoButtons();
@@ -4341,41 +4344,43 @@ async function init() {
     uploadBtn.disabled = false;
     downloadBtn.disabled = false;
 
+    const listen = appLifecycle.listen;
+
     // Set event listeners
-    parseBtn.addEventListener('click', handleParse);
-    validateBtn.addEventListener('click', handleValidate);
-    resetVmBtn.addEventListener('click', handleResetVM);
-    presetSelect.addEventListener('change', handlePresetSelect);
-    uploadBtn.addEventListener('click', handleUpload);
-    downloadBtn.addEventListener('click', handleDownload);
-    exportBtn.addEventListener('click', handleExport);
-    fileInput.addEventListener('change', handleFileSelect);
-    themeToggle.addEventListener('click', toggleTheme);
-    undoBtn.addEventListener('click', handleUndo);
-    redoBtn.addEventListener('click', handleRedo);
-    autoParseToggle.addEventListener('change', scheduleAutoParse);
+    listen(parseBtn, 'click', handleParse);
+    listen(validateBtn, 'click', handleValidate);
+    listen(resetVmBtn, 'click', handleResetVM);
+    listen(presetSelect, 'change', handlePresetSelect);
+    listen(uploadBtn, 'click', handleUpload);
+    listen(downloadBtn, 'click', handleDownload);
+    listen(exportBtn, 'click', handleExport);
+    listen(fileInput, 'change', handleFileSelect);
+    listen(themeToggle, 'click', toggleTheme);
+    listen(undoBtn, 'click', handleUndo);
+    listen(redoBtn, 'click', handleRedo);
+    listen(autoParseToggle, 'change', scheduleAutoParse);
 
     // Symbol modal event listeners
-    symbolModalClose.addEventListener('click', () => closeSymbolModal(true));
-    symbolModalCancel.addEventListener('click', () => closeSymbolModal(true));
-    symbolForm.addEventListener('submit', handleSaveSymbol);
+    listen(symbolModalClose, 'click', () => closeSymbolModal(true));
+    listen(symbolModalCancel, 'click', () => closeSymbolModal(true));
+    listen(symbolForm, 'submit', handleSaveSymbol);
 
     // Close symbol modal on outside click
-    symbolModal.addEventListener('click', (e) => {
+    listen(symbolModal, 'click', (e) => {
       if (e.target === symbolModal) {
         closeSymbolModal(true);
       }
     });
 
     // Rule modal event listeners
-    addRuleBtn.addEventListener('click', () => openRuleModal());
-    modalClose.addEventListener('click', closeRuleModal);
-    modalCancel.addEventListener('click', closeRuleModal);
-    ruleForm.addEventListener('submit', handleSaveRule);
-    addSymbolBtn.addEventListener('click', handleAddSymbol);
+    listen(addRuleBtn, 'click', () => openRuleModal());
+    listen(modalClose, 'click', closeRuleModal);
+    listen(modalCancel, 'click', closeRuleModal);
+    listen(ruleForm, 'submit', handleSaveRule);
+    listen(addSymbolBtn, 'click', handleAddSymbol);
 
     // Add symbol on Enter key
-    symbolInput.addEventListener('keypress', (e) => {
+    listen(symbolInput, 'keypress', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
         handleAddSymbol();
@@ -4383,50 +4388,53 @@ async function init() {
     });
 
     // Close modal on outside click
-    ruleModal.addEventListener('click', (e) => {
+    listen(ruleModal, 'click', (e) => {
       if (e.target === ruleModal) {
         closeRuleModal();
       }
     });
 
     // Symbol type selection modal event listeners
-    symbolTypeModalClose.addEventListener('click', closeSymbolTypeModal);
-    symbolTypeModalCancel.addEventListener('click', closeSymbolTypeModal);
-    registerAsTokenBtn.addEventListener('click', handleRegisterAsToken);
-    registerAsNonterminalBtn.addEventListener('click', handleRegisterAsNonterminal);
+    listen(symbolTypeModalClose, 'click', closeSymbolTypeModal);
+    listen(symbolTypeModalCancel, 'click', closeSymbolTypeModal);
+    listen(registerAsTokenBtn, 'click', handleRegisterAsToken);
+    listen(registerAsNonterminalBtn, 'click', handleRegisterAsNonterminal);
 
     // Close symbol type modal on outside click
-    symbolTypeModal.addEventListener('click', (e) => {
+    listen(symbolTypeModal, 'click', (e) => {
       if (e.target === symbolTypeModal) {
         closeSymbolTypeModal();
       }
     });
 
-    commandPaletteClose.addEventListener('click', closeCommandPalette);
-    commandInput.addEventListener('input', renderCommandPalette);
-    commandInput.addEventListener('keydown', (event) => {
+    listen(commandPaletteClose, 'click', closeCommandPalette);
+    listen(commandInput, 'input', renderCommandPalette);
+    listen(commandInput, 'keydown', (event) => {
       if (event.key !== 'Enter') return;
       const firstCommand = commandList.querySelector('.command-item:not(:disabled)');
       if (!firstCommand) return;
       event.preventDefault();
       firstCommand.click();
     });
-    commandPalette.addEventListener('click', (event) => {
+    listen(commandPalette, 'click', (event) => {
       if (event.target === commandPalette) {
         closeCommandPalette();
       }
     });
-    mobileEditorTab.addEventListener('click', () => setMobileView('editor'));
-    mobileOutputTab.addEventListener('click', () => setMobileView('output'));
+    listen(mobileEditorTab, 'click', () => setMobileView('editor'));
+    listen(mobileOutputTab, 'click', () => setMobileView('output'));
     setMobileView('editor');
 
     // Drag and drop event listeners
-    editorContainer.addEventListener('dragover', handleDragOver);
-    editorContainer.addEventListener('dragleave', handleDragLeave);
-    editorContainer.addEventListener('drop', handleDrop);
+    listen(editorContainer, 'dragover', handleDragOver);
+    listen(editorContainer, 'dragleave', handleDragLeave);
+    listen(editorContainer, 'drop', handleDrop);
 
     // Keyboard shortcuts
-    document.addEventListener('keydown', handleKeyboardShortcuts);
+    listen(document, 'keydown', handleKeyboardShortcuts);
+    appLifecycle.add(() => window.clearTimeout(draftSaveTimer));
+    appLifecycle.add(() => window.clearTimeout(autoParseTimer));
+    listen(window, 'pagehide', () => appLifecycle.dispose(), { once: true });
 
     console.log('Lrama Corral initialized successfully');
   } catch (error) {
