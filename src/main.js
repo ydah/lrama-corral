@@ -3466,11 +3466,11 @@ async function ensureLramaReady() {
  */
 async function handleParse() {
   clearOutput();
-  const source = editor.getValue().trim();
+  const source = editor.getValue();
   const requestId = ++appState.parseRequestId;
   const previousParseResult = appState.latestParseResult;
 
-  if (!source) {
+  if (!source.trim()) {
     showError('Input is empty. Please enter .y file content.');
     return;
   }
@@ -3563,10 +3563,10 @@ async function handlePresetSelect(event) {
  */
 async function handleValidate() {
   clearOutput();
-  const source = editor.getValue().trim();
+  const source = editor.getValue();
   const requestId = ++appState.validateRequestId;
 
-  if (!source) {
+  if (!source.trim()) {
     showError('Input is empty. Please enter .y file content.');
     return;
   }
@@ -3714,7 +3714,7 @@ function handleExport() {
 
   const grammar = appState.latestParseResult.grammar;
   const source = editor.getValue();
-  if (source.trim() !== appState.latestParsedSource) {
+  if (source !== appState.latestParsedSource) {
     alert('The grammar changed after the last successful parse. Please run Parse again before exporting.');
     clearParseState(appState);
     exportBtn.disabled = true;
