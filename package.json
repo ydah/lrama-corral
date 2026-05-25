@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node --test",
+    "test": "node --test test/*.test.js",
+    "test:e2e": "playwright test",
     "test:ruby": "ruby scripts/test-lrama-bundle.rb",
     "check:public-bundles": "node scripts/check-public-bundles.mjs",
     "size:check": "node scripts/check-bundle-size.mjs",
@@ -18,6 +19,7 @@
     "monaco-editor": "^0.45.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "vite": "^8.0.14"
   },
   "keywords": [

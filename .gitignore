@@ -71,6 +71,8 @@ temp/
 coverage/
 *.lcov
 .nyc_output
+test-results/
+playwright-report/
 
 # Lock files (keep Gemfile.lock, package-lock.json is optional)
 # package-lock.json

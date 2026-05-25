@@ -27,5 +27,9 @@ jobs:
         run: npm run build
         env:
           NODE_ENV: production
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+      - name: E2E smoke test
+        run: npm run test:e2e
       - name: Bundle size budget
         run: npm run size:check
