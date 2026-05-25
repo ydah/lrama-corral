@@ -2190,7 +2190,7 @@ function createDependencyGraph(nonterminals, edges, ruleLineByLhs) {
     };
   });
 
-  edges.slice(0, 120).forEach(edge => {
+  edges.forEach(edge => {
     const from = positions[edge.from];
     const to = positions[edge.to];
     if (!from || !to) return;
@@ -2245,16 +2245,6 @@ function createDependencyGraph(nonterminals, edges, ruleLineByLhs) {
 
     svg.appendChild(group);
   });
-
-  if (edges.length > 120) {
-    const warning = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    warning.setAttribute('x', 20);
-    warning.setAttribute('y', height - 20);
-    warning.setAttribute('font-size', '12');
-    warning.setAttribute('fill', 'var(--status-loading-text)');
-    warning.textContent = `Showing first 120 of ${edges.length} dependency edges.`;
-    svg.appendChild(warning);
-  }
 
   return svg;
 }
