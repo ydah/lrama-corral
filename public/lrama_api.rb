@@ -153,7 +153,7 @@ module LramaAPI
         # Extract after grammar.prepare
         tokens = extract_tokens(grammar)
         nonterminals = extract_nonterminals(grammar)
-        rules = extract_rules(grammar)
+        rules = extract_rules(grammar, source)
         start_sym = extract_start_symbol(grammar, source)
         nullable_symbols = extract_nullable_symbols(grammar)
 
@@ -233,7 +233,7 @@ module LramaAPI
         end
         tokens = extract_tokens(grammar)
         nonterminals = extract_nonterminals(grammar)
-        rules = extract_rules(grammar)
+          rules = extract_rules(grammar, source)
         start_sym = extract_start_symbol(grammar, source)
       end
 
@@ -427,14 +427,32 @@ module LramaAPI
       lhs_names.reject { |name| productive.include?(name) }
     end
 
+    def extract_location(location)
+      return nil unless location
+
+      {
+        line: location.first_line,
+        column: location.first_column + 1,
+        end_line: location.last_line,
+        end_column: location.last_column + 1
+      }
+    end
+
+    def extract_symbol_location(symbol)
+      extract_location(symbol.id.location) if symbol&.id&.respond_to?(:location)
+    end
+
     def extract_tokens(grammar)
       return [] unless grammar.terms
 
       grammar.terms.map do |term|
         {
           name: term.id.s_value,
+          alias: term.alias_name,
+          display_name: term.display_name,
           type: term.tag&.name,
-          token_id: term.token_id
+          token_id: term.token_id,
+          location: extract_symbol_location(term)
         }
       end
     end
@@ -448,20 +466,25 @@ module LramaAPI
       }.map do |nterm|
         {
           name: nterm.id.s_value,
-          type: nterm.tag&.name
+          type: nterm.tag&.name,
+          location: extract_symbol_location(nterm)
         }
       end
     end
 
-    def extract_rules(grammar)
+    def extract_rules(grammar, source = nil)
       return [] unless grammar.rules
 
+      source_lines = source ? source.lines : []
       grammar.rules.map do |rule|
         {
           id: rule.id,
           lhs: rule.lhs.id.s_value,
           rhs: extract_rhs(rule),
-          line_number: rule.lineno
+          line_number: rule.lineno,
+          location: extract_location(rule.lhs.id.location),
+          explicit_empty: explicit_empty_rule?(rule, source_lines),
+          action: extract_rule_action(rule)
         }
       end
     end
@@ -469,12 +492,39 @@ module LramaAPI
     def extract_rhs(rule)
       return [] unless rule.rhs
 
-      rule.rhs.map do |symbol|
+      rhs_tokens = rule.respond_to?(:_rhs) ? rule._rhs : []
+      rule.rhs.each_with_index.map do |symbol, index|
         {
           symbol: symbol.id.s_value,
-          type: symbol.term? ? 'terminal' : 'nonterminal'
+          type: symbol.term? ? 'terminal' : 'nonterminal',
+          display_name: symbol.display_name,
+          location: extract_location(rhs_tokens[index]&.location)
         }
       end
+    end
+
+    def explicit_empty_rule?(rule, source_lines)
+      return false unless rule.rhs.empty?
+      line = source_lines[rule.lineno - 1]
+      line&.include?('%empty') || false
+    end
+
+    def extract_rule_action(rule)
+      token_code = rule.respond_to?(:token_code) ? rule.token_code : nil
+      return nil unless token_code
+
+      code = if token_code.respond_to?(:s_value)
+        token_code.s_value
+      elsif token_code.respond_to?(:code)
+        token_code.code
+      else
+        token_code.to_s
+      end
+
+      {
+        present: !code.to_s.empty?,
+        preview: code.to_s.lines.first&.strip
+      }
     end
 
     # Generate syntax diagrams for all nonterminals

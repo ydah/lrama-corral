@@ -143,6 +143,16 @@ begin
     failures << "API FIRST(expr) does not include NUMBER"
   end
 
+  number_token = grammar_info.fetch('tokens').find { |token| token.fetch('name') == 'NUMBER' }
+  unless number_token && number_token.fetch('location').fetch('line') == 5
+    failures << "API token locations do not include NUMBER declaration line"
+  end
+
+  expr_rule = grammar_info.fetch('rules').find { |rule| rule.fetch('lhs') == 'expr' }
+  unless expr_rule && expr_rule.fetch('location').fetch('line') > 0
+    failures << "API rule locations do not include expr rule line"
+  end
+
   unless grammar_info.fetch('state_transitions').any? { |state|
     state.fetch('shifts').any? || state.fetch('gotos').any? || state.fetch('reduces').any?
   }

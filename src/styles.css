@@ -217,6 +217,26 @@ button.secondary:hover:not(:disabled) {
   margin-top: 20px;
 }
 
+.mobile-view-tabs {
+  display: none;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.mobile-view-tabs button {
+  flex: 1;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+
+.mobile-view-tabs button.active,
+.mobile-view-tabs button[aria-selected="true"] {
+  background: var(--btn-primary);
+  color: var(--text-inverse);
+  border-color: var(--btn-primary);
+}
+
 pre {
   background: var(--pre-bg);
   color: var(--pre-text);
@@ -327,6 +347,27 @@ select {
 .rule-symbol.empty {
   font-style: italic;
   color: var(--text-secondary);
+}
+
+.rule-card-action {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.rule-card-action summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.rule-card-action code {
+  display: block;
+  margin-top: 6px;
+  padding: 8px;
+  background: var(--status-bg);
+  color: var(--status-text);
+  border-radius: 4px;
+  white-space: pre-wrap;
 }
 
 [data-theme="dark"] .rule-symbol.terminal {
@@ -621,6 +662,18 @@ select {
 
   .content {
     padding: 15px;
+  }
+
+  .mobile-view-tabs {
+    display: flex;
+  }
+
+  body[data-mobile-view="editor"] .output-section {
+    display: none;
+  }
+
+  body[data-mobile-view="output"] .editor-section {
+    display: none;
   }
 
   #editor-container {

@@ -75,6 +75,8 @@ const commandPalette = document.getElementById('commandPalette');
 const commandPaletteClose = document.getElementById('commandPaletteClose');
 const commandInput = document.getElementById('commandInput');
 const commandList = document.getElementById('commandList');
+const mobileEditorTab = document.getElementById('mobileEditorTab');
+const mobileOutputTab = document.getElementById('mobileOutputTab');
 
 // Monaco Editor instance
 let editor = null;
@@ -124,6 +126,7 @@ let isDirty = false;
 let draftSaveTimer = null;
 let autoParseTimer = null;
 let svgIdCounter = 0;
+let mobileViewMode = 'editor';
 
 /**
  * Yacc/Bison language definition for Monaco Editor
@@ -386,11 +389,14 @@ function registerYaccLanguage() {
 
       const token = grammar.tokens?.find(item => item.name === symbol);
       if (token) {
+        const location = token.location ? `Line ${token.location.line}` : 'Declaration line unknown';
+        const alias = token.alias ? `, Alias: \`${token.alias}\`` : '';
         return {
           range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
           contents: [
             { value: `**Token** \`${token.name}\`` },
-            { value: `Type: \`${token.type || '-'}\`, ID: \`${token.token_id ?? '-'}\`` },
+            { value: `Type: \`${token.type || '-'}\`, ID: \`${token.token_id ?? '-'}\`${alias}` },
+            { value: location },
           ],
         };
       }
@@ -405,6 +411,7 @@ function registerYaccLanguage() {
         contents: [
           { value: `**Nonterminal** \`${nonterminal.name}\`` },
           { value: `Type: \`${nonterminal.type || '-'}\`` },
+          { value: nonterminal.location ? `Declaration: Line ${nonterminal.location.line}` : 'Declaration: rule-derived' },
           { value: `FIRST: \`${first}\`` },
           { value: `FOLLOW: \`${follow}\`` },
         ],
@@ -417,14 +424,14 @@ function registerYaccLanguage() {
       const word = model.getWordAtPosition(position);
       const symbol = word?.word;
       const grammar = latestParseResult?.grammar;
-      if (!symbol || !grammar?.rules) return null;
+      if (!symbol || !grammar) return null;
 
-      const rule = grammar.rules.find(item => item.lhs === symbol && item.line_number);
-      if (!rule) return null;
+      const definition = getSymbolDefinition(symbol, grammar);
+      if (!definition) return null;
 
       return {
         uri: model.uri,
-        range: new monaco.Range(rule.line_number, 1, rule.line_number, model.getLineMaxColumn(rule.line_number)),
+        range: locationToMonacoRange(definition, model),
       };
     },
   });
@@ -737,6 +744,20 @@ function confirmDiscardDirtyContent() {
   return confirm('Current edits will be replaced. Continue?');
 }
 
+function setMobileView(mode) {
+  mobileViewMode = mode === 'output' ? 'output' : 'editor';
+  document.body.dataset.mobileView = mobileViewMode;
+
+  mobileEditorTab.setAttribute('aria-selected', String(mobileViewMode === 'editor'));
+  mobileOutputTab.setAttribute('aria-selected', String(mobileViewMode === 'output'));
+  mobileEditorTab.classList.toggle('active', mobileViewMode === 'editor');
+  mobileOutputTab.classList.toggle('active', mobileViewMode === 'output');
+
+  if (mobileViewMode === 'editor') {
+    editor?.layout();
+  }
+}
+
 function sanitizeDownloadFileName(fileName) {
   const sanitized = fileName.trim().replace(/[\\/:*?"<>|]+/g, '-');
   return sanitized || DEFAULT_DOWNLOAD_FILENAME;
@@ -758,6 +779,47 @@ function validateGrammarFile(file) {
   }
 
   return null;
+}
+
+function getSymbolDefinition(symbol, grammar = latestParseResult?.grammar) {
+  if (!symbol || !grammar) return null;
+
+  const token = grammar.tokens?.find(item => item.name === symbol);
+  if (token?.location) return token.location;
+
+  const nonterminal = grammar.nonterminals?.find(item => item.name === symbol);
+  if (nonterminal?.location) return nonterminal.location;
+
+  const rule = grammar.rules?.find(item => item.lhs === symbol && (item.location || item.line_number));
+  return rule?.location || (rule?.line_number ? { line: rule.line_number, column: 1 } : null);
+}
+
+function locationToMonacoRange(location, model) {
+  const line = Math.max(1, location.line || 1);
+  const column = Math.max(1, location.column || 1);
+  const endLine = Math.max(line, location.end_line || line);
+  const endColumn = location.end_column || model.getLineMaxColumn(endLine);
+  return new monaco.Range(line, column, endLine, Math.max(column + 1, endColumn));
+}
+
+function findRuleById(ruleId) {
+  return latestParseResult?.grammar?.rules?.find(rule => rule.id === ruleId);
+}
+
+function jumpToRuleById(ruleId) {
+  const rule = findRuleById(ruleId);
+  if (!rule) return false;
+  jumpToLine(rule.location?.line || rule.line_number);
+  return true;
+}
+
+function scrollToStateDetails(stateId) {
+  const detail = outputEl.querySelector(`[data-state-detail-id="${stateId}"]`);
+  if (!detail) return false;
+
+  detail.open = true;
+  detail.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  return true;
 }
 
 function setParseMarkers(errors = []) {
@@ -1803,6 +1865,48 @@ function createConflictsSection(conflicts) {
       conflictCard.appendChild(tokensDiv);
     }
 
+    const actionsDiv = document.createElement('div');
+    actionsDiv.style.display = 'flex';
+    actionsDiv.style.gap = '8px';
+    actionsDiv.style.flexWrap = 'wrap';
+    actionsDiv.style.marginTop = '12px';
+
+    if (Number.isInteger(conflict.state)) {
+      const stateBtn = document.createElement('button');
+      stateBtn.type = 'button';
+      stateBtn.className = 'secondary';
+      stateBtn.textContent = `Open State ${conflict.state}`;
+      stateBtn.setAttribute('aria-label', `Open state ${conflict.state} details`);
+      stateBtn.style.padding = '5px 10px';
+      stateBtn.style.fontSize = '12px';
+      stateBtn.addEventListener('click', () => {
+        if (!scrollToStateDetails(conflict.state)) {
+          updateStatus(`State ${conflict.state} is not visible`, 'loading');
+        }
+      });
+      actionsDiv.appendChild(stateBtn);
+    }
+
+    (conflict.rules || []).forEach(ruleId => {
+      const ruleBtn = document.createElement('button');
+      ruleBtn.type = 'button';
+      ruleBtn.className = 'secondary';
+      ruleBtn.textContent = `Jump Rule #${ruleId}`;
+      ruleBtn.setAttribute('aria-label', `Jump to rule ${ruleId}`);
+      ruleBtn.style.padding = '5px 10px';
+      ruleBtn.style.fontSize = '12px';
+      ruleBtn.addEventListener('click', () => {
+        if (!jumpToRuleById(ruleId)) {
+          updateStatus(`Rule #${ruleId} is not available`, 'loading');
+        }
+      });
+      actionsDiv.appendChild(ruleBtn);
+    });
+
+    if (actionsDiv.childNodes.length > 0) {
+      conflictCard.appendChild(actionsDiv);
+    }
+
     section.appendChild(conflictCard);
   });
 
@@ -2472,6 +2576,7 @@ function createRulesCardView(rules) {
   rules.forEach((rule) => {
     const card = document.createElement('div');
     card.className = 'rule-card';
+    card.dataset.ruleId = String(rule.id);
 
     // Click to jump to editor
     if (rule.line_number) {
@@ -2533,17 +2638,32 @@ function createRulesCardView(rules) {
       rule.rhs.forEach((sym) => {
         const symSpan = document.createElement('span');
         symSpan.className = `rule-symbol ${sym.type}`;
-        symSpan.textContent = sym.symbol;
+        symSpan.textContent = sym.display_name || sym.symbol;
+        if (sym.display_name && sym.display_name !== sym.symbol) {
+          symSpan.title = sym.symbol;
+        }
         rhsContainer.appendChild(symSpan);
       });
     } else {
       const emptySpan = document.createElement('span');
       emptySpan.className = 'rule-symbol empty';
-      emptySpan.textContent = 'ε (empty)';
+      emptySpan.textContent = rule.explicit_empty ? '%empty' : 'ε (empty)';
       rhsContainer.appendChild(emptySpan);
     }
 
     card.appendChild(rhsContainer);
+
+    if (rule.action?.present) {
+      const actionDetails = document.createElement('details');
+      actionDetails.className = 'rule-card-action';
+      const actionSummary = document.createElement('summary');
+      actionSummary.textContent = 'Action';
+      actionDetails.appendChild(actionSummary);
+      const actionPreview = document.createElement('code');
+      actionPreview.textContent = rule.action.preview || '(action code)';
+      actionDetails.appendChild(actionPreview);
+      card.appendChild(actionDetails);
+    }
 
     // アクションボタン
     const actionsDiv = document.createElement('div');
@@ -3186,6 +3306,17 @@ function createStateDetailCard(state) {
       itemLine.style.fontFamily = 'monospace';
       itemLine.style.fontSize = '12px';
       itemLine.style.marginLeft = '10px';
+      itemLine.tabIndex = 0;
+      itemLine.setAttribute('role', 'button');
+      itemLine.title = `Jump to rule ${item.rule_id}`;
+      itemLine.style.cursor = 'pointer';
+      const jump = () => jumpToRuleById(item.rule_id);
+      itemLine.addEventListener('click', jump);
+      itemLine.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        jump();
+      });
       itemsDiv.appendChild(itemLine);
     });
     content.appendChild(itemsDiv);
@@ -3596,6 +3727,7 @@ function createRulesTerminalView(rules) {
 
   rules.forEach((rule) => {
     const ruleLine = document.createElement('div');
+    ruleLine.dataset.ruleId = String(rule.id);
     ruleLine.style.marginBottom = '8px';
 
     // Make clickable if line number is available
@@ -3654,16 +3786,27 @@ function createRulesTerminalView(rules) {
         }
 
         const symSpan = document.createElement('span');
-        symSpan.textContent = sym.symbol;
+        symSpan.textContent = sym.display_name || sym.symbol;
+        if (sym.display_name && sym.display_name !== sym.symbol) {
+          symSpan.title = sym.symbol;
+        }
         symSpan.style.color = sym.type === 'terminal' ? '#2ecc71' : '#e74c3c';
         ruleLine.appendChild(symSpan);
       });
     } else {
       const emptySpan = document.createElement('span');
-      emptySpan.textContent = '/* empty */';
+      emptySpan.textContent = rule.explicit_empty ? '%empty' : '/* empty */';
       emptySpan.style.color = '#95a5a6';
       emptySpan.style.fontStyle = 'italic';
       ruleLine.appendChild(emptySpan);
+    }
+
+    if (rule.action?.present) {
+      const actionSpan = document.createElement('span');
+      actionSpan.textContent = ' { ... }';
+      actionSpan.title = rule.action.preview || 'Action code';
+      actionSpan.style.color = '#f1c40f';
+      ruleLine.appendChild(actionSpan);
     }
 
     // Line number
@@ -3716,6 +3859,7 @@ async function handleParse() {
     if (result.success) {
       updateStatus('Parse successful', 'ready');
       showStructuredResult(result, previousParseResult);
+      setMobileView('output');
       // Show new rule add button
       addRuleBtn.style.display = 'block';
       // Save parse result and enable export button
@@ -4365,6 +4509,9 @@ async function init() {
         closeCommandPalette();
       }
     });
+    mobileEditorTab.addEventListener('click', () => setMobileView('editor'));
+    mobileOutputTab.addEventListener('click', () => setMobileView('output'));
+    setMobileView('editor');
 
     // Drag and drop event listeners
     editorContainer.addEventListener('dragover', handleDragOver);

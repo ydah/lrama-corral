@@ -1,14 +1,27 @@
 /**
  * @typedef {Object} GrammarSymbol
  * @property {string} name
+ * @property {string|null} [alias]
+ * @property {string} [display_name]
  * @property {string|null} [type]
  * @property {number|null} [token_id]
+ * @property {SourceLocation|null} [location]
+ */
+
+/**
+ * @typedef {Object} SourceLocation
+ * @property {number} line
+ * @property {number} column
+ * @property {number} end_line
+ * @property {number} end_column
  */
 
 /**
  * @typedef {Object} GrammarRuleSymbol
  * @property {string} symbol
  * @property {'terminal'|'nonterminal'|string} type
+ * @property {string} [display_name]
+ * @property {SourceLocation|null} [location]
  */
 
 /**
@@ -17,6 +30,9 @@
  * @property {string} lhs
  * @property {GrammarRuleSymbol[]} rhs
  * @property {number|null} [line_number]
+ * @property {SourceLocation|null} [location]
+ * @property {boolean} [explicit_empty]
+ * @property {{present:boolean, preview:string|null}|null} [action]
  */
 
 /**
