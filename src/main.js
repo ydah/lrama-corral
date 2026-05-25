@@ -114,11 +114,14 @@ const GRAPH_ZOOM_STEP = 0.15;
 const GRAPH_MIN_ZOOM = 0.35;
 const GRAPH_MAX_ZOOM = 2.5;
 const STATE_GRAPH_COLORS = {
-  state: '#3498db',
-  conflict: '#e74c3c',
-  shift: '#2ecc71',
-  goto: '#3498db',
-  reduce: '#f39c12',
+  state: 'var(--btn-primary)',
+  conflict: 'var(--status-error-text)',
+  shift: 'var(--status-ready-text)',
+  goto: 'var(--btn-primary)',
+  reduce: 'var(--status-loading-text)',
+  edge: 'var(--text-secondary)',
+  highlight: 'var(--status-loading-text)',
+  nodeStroke: 'var(--text-primary)',
 };
 let draftSaveTimer = null;
 let autoParseTimer = null;
@@ -1956,7 +1959,7 @@ function createDependencyGraph(nonterminals, edges, ruleLineByLhs) {
   svg.style.borderRadius = '4px';
 
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-  defs.appendChild(createArrowMarker(markerId, '#7f8c8d'));
+  defs.appendChild(createArrowMarker(markerId, STATE_GRAPH_COLORS.edge));
   svg.appendChild(defs);
 
   const positions = {};
@@ -2061,7 +2064,7 @@ function drawDependencyEdge(svg, from, to, isSelfLoop, nodeRadius, markerId) {
     path.setAttribute('d', `M ${startX} ${startY} Q ${midX - dy / 12} ${midY + dx / 12} ${endX} ${endY}`);
   }
 
-  path.setAttribute('stroke', '#7f8c8d');
+  path.setAttribute('stroke', STATE_GRAPH_COLORS.edge);
   path.setAttribute('stroke-width', '1.5');
   path.setAttribute('fill', 'none');
   path.setAttribute('opacity', '0.7');
@@ -2566,7 +2569,7 @@ function createStateTransitionGraph(stateTransitions, options = {}) {
 
   // Arrow marker definition
   const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-  defs.appendChild(createArrowMarker(markerId, '#666'));
+  defs.appendChild(createArrowMarker(markerId, STATE_GRAPH_COLORS.edge));
   svg.appendChild(defs);
 
   // Draw edges (transitions)
@@ -2736,7 +2739,7 @@ function drawStateNode(svg, pos, stateId, hasConflict, radius, onStateClick = nu
   circle.setAttribute('cy', pos.y);
   circle.setAttribute('r', radius);
   circle.setAttribute('fill', hasConflict ? STATE_GRAPH_COLORS.conflict : STATE_GRAPH_COLORS.state);
-  circle.setAttribute('stroke', '#2c3e50');
+  circle.setAttribute('stroke', STATE_GRAPH_COLORS.nodeStroke);
   circle.setAttribute('stroke-width', '2');
   group.appendChild(circle);
 
@@ -2786,7 +2789,7 @@ function applyStateSearch(svg, stateTransitions, query) {
     node.style.opacity = queryText && !isMatch ? '0.18' : '1';
     const circle = node.querySelector('circle');
     if (circle) {
-      circle.setAttribute('stroke', queryText && isMatch ? '#f1c40f' : '#2c3e50');
+      circle.setAttribute('stroke', queryText && isMatch ? STATE_GRAPH_COLORS.highlight : STATE_GRAPH_COLORS.nodeStroke);
       circle.setAttribute('stroke-width', queryText && isMatch ? '4' : '2');
     }
   });

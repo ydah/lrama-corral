@@ -17,7 +17,7 @@ export function appendJsonResult(outputEl, title, data) {
   const titleEl = documentRef.createElement('h3');
   titleEl.textContent = title;
   titleEl.style.marginBottom = '10px';
-  titleEl.style.color = '#2c3e50';
+  titleEl.style.color = 'var(--text-primary)';
 
   const preEl = documentRef.createElement('pre');
   preEl.textContent = JSON.stringify(data, null, 2);
@@ -36,7 +36,7 @@ export function appendCollapsibleJsonResult(outputEl, title, data, options = {})
   summaryEl.textContent = title;
   summaryEl.style.cursor = 'pointer';
   summaryEl.style.fontWeight = '600';
-  summaryEl.style.color = '#2c3e50';
+  summaryEl.style.color = 'var(--text-primary)';
 
   const preEl = documentRef.createElement('pre');
   preEl.textContent = JSON.stringify(data, null, 2);
