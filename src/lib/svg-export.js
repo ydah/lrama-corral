@@ -53,7 +53,12 @@ function getExportBackgroundColor(svgElement, options = {}) {
     }
     node = node.parentElement;
   }
-  return options.darkMode ? '#1e1e1e' : '#ffffff';
+  return readCssColor(options.darkMode ? '--bg-header' : '--bg-secondary', options.darkMode ? '#1e1e1e' : '#ffffff');
+}
+
+function readCssColor(name, fallback) {
+  const value = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return value || fallback;
 }
 
 function addSvgExportBackground(sourceSvg, cloneSvg, options = {}) {

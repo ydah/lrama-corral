@@ -24,6 +24,37 @@
   --error-border: #f5c6cb;
   --pre-bg: #2c3e50;
   --pre-text: #ecf0f1;
+  --focus-ring: rgba(52, 152, 219, 0.1);
+  --inverse-hover-bg: rgba(255, 255, 255, 0.1);
+  --overlay-bg: rgba(0, 0, 0, 0.5);
+  --elevated-shadow: rgba(0, 0, 0, 0.3);
+  --floating-shadow: rgba(0, 0, 0, 0.3);
+  --floating-shadow-hover: rgba(0, 0, 0, 0.4);
+  --table-header-bg: #34495e;
+  --table-header-border: #2c3e50;
+  --table-row-alt-bg: #f9f9f9;
+  --accent-terminal-bg: rgba(46, 204, 113, 0.15);
+  --accent-terminal-text: #27ae60;
+  --accent-terminal-border: rgba(46, 204, 113, 0.3);
+  --accent-nonterminal-bg: rgba(52, 152, 219, 0.15);
+  --accent-nonterminal-text: #2980b9;
+  --accent-nonterminal-border: rgba(52, 152, 219, 0.3);
+  --accent-empty-bg: rgba(155, 89, 182, 0.15);
+  --accent-empty-text: #8e44ad;
+  --accent-empty-border: rgba(155, 89, 182, 0.3);
+  --accent-warning-bg: rgba(243, 156, 18, 0.15);
+  --accent-warning-soft-bg: rgba(243, 156, 18, 0.1);
+  --accent-warning-text: #b36b00;
+  --accent-warning-strong: #f39c12;
+  --accent-warning-border: rgba(243, 156, 18, 0.3);
+  --accent-error-bg: rgba(231, 76, 60, 0.15);
+  --accent-error-soft-bg: rgba(231, 76, 60, 0.1);
+  --accent-error-text: #c0392b;
+  --accent-error-strong: #e74c3c;
+  --accent-error-border: rgba(231, 76, 60, 0.3);
+  --accent-success-soft-bg: rgba(46, 204, 113, 0.1);
+  --accent-success-border: rgba(46, 204, 113, 0.35);
+  --rule-hover-bg: rgba(52, 152, 219, 0.2);
 }
 
 [data-theme="dark"] {
@@ -52,6 +83,37 @@
   --error-border: #e74c3c;
   --pre-bg: #1e1e1e;
   --pre-text: #d4d4d4;
+  --focus-ring: rgba(93, 173, 226, 0.18);
+  --inverse-hover-bg: rgba(255, 255, 255, 0.1);
+  --overlay-bg: rgba(0, 0, 0, 0.65);
+  --elevated-shadow: rgba(0, 0, 0, 0.45);
+  --floating-shadow: rgba(0, 0, 0, 0.45);
+  --floating-shadow-hover: rgba(0, 0, 0, 0.55);
+  --table-header-bg: #404040;
+  --table-header-border: #5a5a5a;
+  --table-row-alt-bg: #242424;
+  --accent-terminal-bg: rgba(46, 204, 113, 0.2);
+  --accent-terminal-text: #2ecc71;
+  --accent-terminal-border: rgba(46, 204, 113, 0.4);
+  --accent-nonterminal-bg: rgba(52, 152, 219, 0.2);
+  --accent-nonterminal-text: #5dade2;
+  --accent-nonterminal-border: rgba(52, 152, 219, 0.4);
+  --accent-empty-bg: rgba(155, 89, 182, 0.22);
+  --accent-empty-text: #c39bd3;
+  --accent-empty-border: rgba(155, 89, 182, 0.42);
+  --accent-warning-bg: rgba(243, 156, 18, 0.2);
+  --accent-warning-soft-bg: rgba(243, 156, 18, 0.14);
+  --accent-warning-text: #f1c40f;
+  --accent-warning-strong: #f1c40f;
+  --accent-warning-border: rgba(243, 156, 18, 0.42);
+  --accent-error-bg: rgba(231, 76, 60, 0.2);
+  --accent-error-soft-bg: rgba(231, 76, 60, 0.14);
+  --accent-error-text: #e74c3c;
+  --accent-error-strong: #e74c3c;
+  --accent-error-border: rgba(231, 76, 60, 0.42);
+  --accent-success-soft-bg: rgba(46, 204, 113, 0.14);
+  --accent-success-border: rgba(46, 204, 113, 0.42);
+  --rule-hover-bg: rgba(52, 152, 219, 0.25);
 }
 
 * {
@@ -89,7 +151,7 @@ header {
 .header-left h1 {
   font-size: 24px;
   margin-bottom: 8px;
-  color: #e0e0e0;
+  color: var(--text-inverse);
 }
 
 .subtitle {
@@ -110,7 +172,7 @@ header {
 }
 
 .theme-toggle:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--inverse-hover-bg);
 }
 
 .status {
@@ -163,7 +225,7 @@ label {
 #editor-container.drag-over {
   border-color: var(--btn-primary);
   border-width: 2px;
-  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .button-group {
@@ -187,7 +249,7 @@ label {
 button {
   padding: 10px 20px;
   background: var(--btn-primary);
-  color: white;
+  color: var(--text-inverse);
   border: none;
   border-radius: 4px;
   cursor: pointer;
@@ -333,15 +395,15 @@ select {
 }
 
 .rule-symbol.terminal {
-  background: rgba(46, 204, 113, 0.15);
-  color: #27ae60;
-  border: 1px solid rgba(46, 204, 113, 0.3);
+  background: var(--accent-terminal-bg);
+  color: var(--accent-terminal-text);
+  border: 1px solid var(--accent-terminal-border);
 }
 
 .rule-symbol.nonterminal {
-  background: rgba(52, 152, 219, 0.15);
-  color: #2980b9;
-  border: 1px solid rgba(52, 152, 219, 0.3);
+  background: var(--accent-nonterminal-bg);
+  color: var(--accent-nonterminal-text);
+  border: 1px solid var(--accent-nonterminal-border);
 }
 
 .rule-symbol.empty {
@@ -370,18 +432,6 @@ select {
   white-space: pre-wrap;
 }
 
-[data-theme="dark"] .rule-symbol.terminal {
-  background: rgba(46, 204, 113, 0.2);
-  color: #2ecc71;
-  border-color: rgba(46, 204, 113, 0.4);
-}
-
-[data-theme="dark"] .rule-symbol.nonterminal {
-  background: rgba(52, 152, 219, 0.2);
-  color: #3498db;
-  border-color: rgba(52, 152, 219, 0.4);
-}
-
 .view-toggle {
   display: flex;
   gap: 10px;
@@ -396,7 +446,7 @@ select {
 
 .view-toggle button.active {
   background: var(--btn-primary);
-  color: white;
+  color: var(--text-inverse);
 }
 
 /* Modal */
@@ -407,7 +457,7 @@ select {
   left: 0;
   width: 100%;
   height: 100%;
-  background: rgba(0, 0, 0, 0.5);
+  background: var(--overlay-bg);
   z-index: 1000;
   align-items: center;
   justify-content: center;
@@ -438,7 +488,7 @@ select {
   width: 90%;
   max-height: 80vh;
   overflow-y: auto;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 20px var(--elevated-shadow);
 }
 
 .modal-header {
@@ -503,7 +553,7 @@ select {
 .form-group textarea:focus {
   outline: none;
   border-color: var(--btn-primary);
-  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.1);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 .symbols-list {
@@ -523,7 +573,7 @@ select {
   gap: 6px;
   padding: 6px 12px;
   background: var(--btn-secondary);
-  color: white;
+  color: var(--text-inverse);
   border-radius: 4px;
   font-family: 'Courier New', monospace;
   font-size: 13px;
@@ -532,7 +582,7 @@ select {
 .symbol-tag button {
   background: transparent;
   border: none;
-  color: white;
+  color: var(--text-inverse);
   cursor: pointer;
   padding: 0;
   font-size: 16px;
@@ -540,7 +590,7 @@ select {
 }
 
 .symbol-tag button:hover {
-  color: #e74c3c;
+  color: var(--status-error-text);
 }
 
 .symbol-input-group {
@@ -608,18 +658,18 @@ select {
   height: 60px;
   border-radius: 50%;
   background: var(--btn-primary);
-  color: white;
+  color: var(--text-inverse);
   font-size: 24px;
   border: none;
   cursor: pointer;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 12px var(--floating-shadow);
   transition: all 0.2s;
   z-index: 100;
 }
 
 .add-rule-btn:hover {
   transform: scale(1.1);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 6px 16px var(--floating-shadow-hover);
 }
 
 .rule-card-actions {

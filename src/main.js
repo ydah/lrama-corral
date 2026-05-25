@@ -1063,7 +1063,7 @@ function showStructuredResult(data, previousResult = null) {
   const titleEl = document.createElement('h3');
   titleEl.textContent = 'Grammar Structure';
   titleEl.style.marginBottom = '15px';
-  titleEl.style.color = '#2c3e50';
+  titleEl.style.color = 'var(--text-primary)';
   outputEl.appendChild(titleEl);
 
   // Start symbol
@@ -1269,9 +1269,9 @@ function createNullableSection(nullableSymbols) {
     tag.style.borderRadius = '3px';
     tag.style.fontSize = '12px';
     tag.style.fontFamily = "'Courier New', monospace";
-    tag.style.background = 'rgba(155, 89, 182, 0.15)';
-    tag.style.color = '#8e44ad';
-    tag.style.border = '1px solid rgba(155, 89, 182, 0.3)';
+    tag.style.background = 'var(--accent-empty-bg)';
+    tag.style.color = 'var(--accent-empty-text)';
+    tag.style.border = '1px solid var(--accent-empty-border)';
     container.appendChild(tag);
   });
 
@@ -1330,9 +1330,9 @@ function createLintSection(lint) {
       tag.style.borderRadius = '3px';
       tag.style.fontSize = '12px';
       tag.style.fontFamily = "'Courier New', monospace";
-      tag.style.background = 'rgba(243, 156, 18, 0.15)';
-      tag.style.color = '#b36b00';
-      tag.style.border = '1px solid rgba(243, 156, 18, 0.3)';
+      tag.style.background = 'var(--accent-warning-bg)';
+      tag.style.color = 'var(--accent-warning-text)';
+      tag.style.border = '1px solid var(--accent-warning-border)';
       valuesEl.appendChild(tag);
     });
 
@@ -1353,7 +1353,9 @@ function createConflictsSection(conflicts) {
   // Title
   const titleEl = document.createElement('h4');
   titleEl.textContent = `Potential Conflicts (${conflicts.length})`;
-  titleEl.style.color = conflicts.some(c => c.severity === 'error') ? '#e74c3c' : '#f39c12';
+  titleEl.style.color = conflicts.some(c => c.severity === 'error')
+    ? 'var(--accent-error-strong)'
+    : 'var(--accent-warning-strong)';
   titleEl.style.marginBottom = '10px';
   titleEl.style.fontSize = '16px';
   section.appendChild(titleEl);
@@ -1370,9 +1372,11 @@ function createConflictsSection(conflicts) {
   conflicts.forEach((conflict, index) => {
     const conflictCard = document.createElement('div');
     conflictCard.style.background = conflict.severity === 'error'
-      ? 'rgba(231, 76, 60, 0.1)'
-      : 'rgba(243, 156, 18, 0.1)';
-    conflictCard.style.border = `2px solid ${conflict.severity === 'error' ? '#e74c3c' : '#f39c12'}`;
+      ? 'var(--accent-error-soft-bg)'
+      : 'var(--accent-warning-soft-bg)';
+    conflictCard.style.border = conflict.severity === 'error'
+      ? '2px solid var(--accent-error-strong)'
+      : '2px solid var(--accent-warning-strong)';
     conflictCard.style.borderRadius = '6px';
     conflictCard.style.padding = '15px';
     conflictCard.style.marginBottom = '12px';
@@ -1386,8 +1390,10 @@ function createConflictsSection(conflicts) {
     severityTag.style.fontSize = '11px';
     severityTag.style.fontWeight = 'bold';
     severityTag.style.marginBottom = '8px';
-    severityTag.style.background = conflict.severity === 'error' ? '#e74c3c' : '#f39c12';
-    severityTag.style.color = 'white';
+    severityTag.style.background = conflict.severity === 'error'
+      ? 'var(--accent-error-strong)'
+      : 'var(--accent-warning-strong)';
+    severityTag.style.color = 'var(--text-inverse)';
     conflictCard.appendChild(severityTag);
 
     // Type tag
@@ -1470,9 +1476,9 @@ function createConflictsSection(conflicts) {
         tokenSpan.style.borderRadius = '3px';
         tokenSpan.style.fontSize = '12px';
         tokenSpan.style.fontFamily = "'Courier New', monospace";
-        tokenSpan.style.background = 'rgba(231, 76, 60, 0.15)';
-        tokenSpan.style.color = '#c0392b';
-        tokenSpan.style.border = '1px solid rgba(231, 76, 60, 0.3)';
+        tokenSpan.style.background = 'var(--accent-error-bg)';
+        tokenSpan.style.color = 'var(--accent-error-text)';
+        tokenSpan.style.border = '1px solid var(--accent-error-border)';
         tokenSpan.style.fontWeight = 'bold';
         tokensDiv.appendChild(tokenSpan);
       });
@@ -1548,8 +1554,8 @@ function createResolvedConflictsSection(resolvedConflicts) {
 
   resolvedConflicts.forEach(conflict => {
     const card = document.createElement('div');
-    card.style.background = 'rgba(46, 204, 113, 0.1)';
-    card.style.border = '1px solid rgba(46, 204, 113, 0.35)';
+    card.style.background = 'var(--accent-success-soft-bg)';
+    card.style.border = '1px solid var(--accent-success-border)';
     card.style.borderRadius = '6px';
     card.style.padding = '12px';
     card.style.marginBottom = '10px';
@@ -1612,7 +1618,7 @@ function createFirstFollowSection(firstSets, followSets, previousFirstSets = nul
   // Title
   const titleEl = document.createElement('h4');
   titleEl.textContent = 'First/Follow Sets';
-  titleEl.style.color = '#34495e';
+  titleEl.style.color = 'var(--text-primary)';
   titleEl.style.marginBottom = '10px';
   titleEl.style.fontSize = '16px';
   section.appendChild(titleEl);
@@ -1692,14 +1698,14 @@ function createFirstFollowSection(firstSets, followSets, previousFirstSets = nul
 
         // Special color for ε
         if (token === 'ε') {
-          tokenSpan.style.background = 'rgba(155, 89, 182, 0.15)';
-          tokenSpan.style.color = '#8e44ad';
-          tokenSpan.style.border = '1px solid rgba(155, 89, 182, 0.3)';
+          tokenSpan.style.background = 'var(--accent-empty-bg)';
+          tokenSpan.style.color = 'var(--accent-empty-text)';
+          tokenSpan.style.border = '1px solid var(--accent-empty-border)';
           tokenSpan.style.fontStyle = 'italic';
         } else {
-          tokenSpan.style.background = 'rgba(46, 204, 113, 0.15)';
-          tokenSpan.style.color = '#27ae60';
-          tokenSpan.style.border = '1px solid rgba(46, 204, 113, 0.3)';
+          tokenSpan.style.background = 'var(--accent-terminal-bg)';
+          tokenSpan.style.color = 'var(--accent-terminal-text)';
+          tokenSpan.style.border = '1px solid var(--accent-terminal-border)';
         }
 
         firstDiv.appendChild(tokenSpan);
@@ -1741,14 +1747,14 @@ function createFirstFollowSection(firstSets, followSets, previousFirstSets = nul
 
         // Special color for $
         if (token === '$') {
-          tokenSpan.style.background = 'rgba(231, 76, 60, 0.15)';
-          tokenSpan.style.color = '#c0392b';
-          tokenSpan.style.border = '1px solid rgba(231, 76, 60, 0.3)';
+          tokenSpan.style.background = 'var(--accent-error-bg)';
+          tokenSpan.style.color = 'var(--accent-error-text)';
+          tokenSpan.style.border = '1px solid var(--accent-error-border)';
           tokenSpan.style.fontWeight = 'bold';
         } else {
-          tokenSpan.style.background = 'rgba(52, 152, 219, 0.15)';
-          tokenSpan.style.color = '#2980b9';
-          tokenSpan.style.border = '1px solid rgba(52, 152, 219, 0.3)';
+          tokenSpan.style.background = 'var(--accent-nonterminal-bg)';
+          tokenSpan.style.color = 'var(--accent-nonterminal-text)';
+          tokenSpan.style.border = '1px solid var(--accent-nonterminal-border)';
         }
 
         followDiv.appendChild(tokenSpan);
@@ -1785,7 +1791,7 @@ function createFirstFollowTable(firstSets, followSets, previousFirstSets = null,
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
   headerRow.style.background = 'var(--btn-primary)';
-  headerRow.style.color = 'white';
+  headerRow.style.color = 'var(--text-inverse)';
   headers.forEach(header => {
     const th = document.createElement('th');
     th.textContent = header;
@@ -2021,7 +2027,7 @@ function createDependencyGraph(nonterminals, edges, ruleLineByLhs) {
     shortLabel.setAttribute('y', pos.y + 4);
     shortLabel.setAttribute('font-size', '12');
     shortLabel.setAttribute('font-weight', 'bold');
-    shortLabel.setAttribute('fill', 'white');
+    shortLabel.setAttribute('fill', 'var(--text-inverse)');
     shortLabel.setAttribute('text-anchor', 'middle');
     shortLabel.textContent = String(nonterminals.indexOf(name) + 1);
     group.appendChild(shortLabel);
@@ -2088,7 +2094,7 @@ function createSection(title, items, headers) {
 
   const titleEl = document.createElement('h4');
   titleEl.textContent = `${title} (${items.length})`;
-  titleEl.style.color = '#34495e';
+  titleEl.style.color = 'var(--text-primary)';
   titleEl.style.marginBottom = '10px';
   titleEl.style.fontSize = '16px';
   section.appendChild(titleEl);
@@ -2096,21 +2102,21 @@ function createSection(title, items, headers) {
   const table = document.createElement('table');
   table.style.width = '100%';
   table.style.borderCollapse = 'collapse';
-  table.style.background = 'white';
-  table.style.border = '1px solid #ddd';
+  table.style.background = 'var(--bg-secondary)';
+  table.style.border = '1px solid var(--border-color)';
 
   // Header
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
-  headerRow.style.background = '#34495e';
-  headerRow.style.color = 'white';
+  headerRow.style.background = 'var(--table-header-bg)';
+  headerRow.style.color = 'var(--text-inverse)';
 
   headers.forEach(header => {
     const th = document.createElement('th');
     th.textContent = header;
     th.style.padding = '8px 12px';
     th.style.textAlign = 'left';
-    th.style.borderBottom = '2px solid #2c3e50';
+    th.style.borderBottom = '2px solid var(--table-header-border)';
     headerRow.appendChild(th);
   });
 
@@ -2121,13 +2127,14 @@ function createSection(title, items, headers) {
   const tbody = document.createElement('tbody');
   items.forEach((item, index) => {
     const row = document.createElement('tr');
-    row.style.background = index % 2 === 0 ? '#f9f9f9' : 'white';
+    row.style.background = index % 2 === 0 ? 'var(--table-row-alt-bg)' : 'var(--bg-secondary)';
 
     Object.values(item).forEach(value => {
       const td = document.createElement('td');
       td.textContent = value;
       td.style.padding = '6px 12px';
-      td.style.borderBottom = '1px solid #ddd';
+      td.style.borderBottom = '1px solid var(--border-color)';
+      td.style.color = 'var(--text-primary)';
       row.appendChild(td);
     });
 
@@ -2156,7 +2163,7 @@ function createSymbolSection(title, items, headers, symbolType, originalData) {
 
   const titleEl = document.createElement('h4');
   titleEl.textContent = `${title} (${items.length})`;
-  titleEl.style.color = '#34495e';
+  titleEl.style.color = 'var(--text-primary)';
   titleEl.style.fontSize = '16px';
   titleEl.style.margin = '0';
   headerDiv.appendChild(titleEl);
@@ -2183,15 +2190,15 @@ function createSymbolSection(title, items, headers, symbolType, originalData) {
   // Header (add Actions column)
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
-  headerRow.style.background = '#34495e';
-  headerRow.style.color = 'white';
+  headerRow.style.background = 'var(--table-header-bg)';
+  headerRow.style.color = 'var(--text-inverse)';
 
   [...headers, 'Actions'].forEach(header => {
     const th = document.createElement('th');
     th.textContent = header;
     th.style.padding = '8px 12px';
     th.style.textAlign = 'left';
-    th.style.borderBottom = '2px solid #2c3e50';
+    th.style.borderBottom = '2px solid var(--table-header-border)';
     headerRow.appendChild(th);
   });
 
@@ -2389,7 +2396,7 @@ function createStateTransitionSection(stateTransitions) {
   // Title
   const titleEl = document.createElement('h4');
   titleEl.textContent = `State Transition Diagram (${stateTransitions.length} states)`;
-  titleEl.style.color = '#34495e';
+  titleEl.style.color = 'var(--text-primary)';
   titleEl.style.marginBottom = '10px';
   titleEl.style.fontSize = '16px';
   section.appendChild(titleEl);
@@ -2749,7 +2756,7 @@ function drawStateNode(svg, pos, stateId, hasConflict, radius, onStateClick = nu
   text.setAttribute('y', pos.y + 5);
   text.setAttribute('font-size', '14');
   text.setAttribute('font-weight', 'bold');
-  text.setAttribute('fill', 'white');
+  text.setAttribute('fill', 'var(--text-inverse)');
   text.setAttribute('text-anchor', 'middle');
   text.setAttribute('pointer-events', 'none');
   text.textContent = stateId;
@@ -3010,7 +3017,7 @@ function createParseTableSection(stateTransitions) {
   const thead = document.createElement('thead');
   const headerRow = document.createElement('tr');
   headerRow.style.background = 'var(--btn-primary)';
-  headerRow.style.color = 'white';
+  headerRow.style.color = 'var(--text-inverse)';
   ['State', 'ACTION', 'GOTO', 'Conflicts'].forEach(header => {
     const th = document.createElement('th');
     th.textContent = header;
@@ -3266,7 +3273,7 @@ function createRulesSection(rules) {
 
   const titleEl = document.createElement('h4');
   titleEl.textContent = `Rules (${rules.length})`;
-  titleEl.style.color = '#34495e';
+  titleEl.style.color = 'var(--text-primary)';
   titleEl.style.fontSize = '16px';
   titleEl.style.margin = '0';
   headerDiv.appendChild(titleEl);
@@ -3336,10 +3343,10 @@ function createRulesSection(rules) {
 function createRulesTerminalView(rules) {
   const rulesContainer = document.createElement('div');
   rulesContainer.className = 'rules-terminal';
-  rulesContainer.style.background = '#2c3e50';
+  rulesContainer.style.background = 'var(--pre-bg)';
   rulesContainer.style.padding = '15px';
   rulesContainer.style.borderRadius = '4px';
-  rulesContainer.style.color = '#ecf0f1';
+  rulesContainer.style.color = 'var(--pre-text)';
   rulesContainer.style.fontFamily = "'Courier New', monospace";
   rulesContainer.style.fontSize = '13px';
   rulesContainer.style.lineHeight = '1.6';
@@ -3356,7 +3363,7 @@ function createRulesTerminalView(rules) {
 
       // Hover appearance
       ruleLine.addEventListener('mouseenter', () => {
-        ruleLine.style.backgroundColor = 'rgba(52, 152, 219, 0.2)';
+        ruleLine.style.backgroundColor = 'var(--rule-hover-bg)';
       });
 
       ruleLine.addEventListener('mouseleave', () => {
@@ -3378,21 +3385,21 @@ function createRulesTerminalView(rules) {
     // Rule ID (line number)
     const idSpan = document.createElement('span');
     idSpan.textContent = `[${rule.id}] `;
-    idSpan.style.color = '#95a5a6';
+    idSpan.style.color = 'var(--btn-secondary)';
     idSpan.style.marginRight = '8px';
     ruleLine.appendChild(idSpan);
 
     // LHS
     const lhsSpan = document.createElement('span');
     lhsSpan.textContent = rule.lhs;
-    lhsSpan.style.color = '#3498db';
+    lhsSpan.style.color = 'var(--btn-primary)';
     lhsSpan.style.fontWeight = 'bold';
     ruleLine.appendChild(lhsSpan);
 
     // Colon
     const colonSpan = document.createElement('span');
     colonSpan.textContent = ' : ';
-    colonSpan.style.color = '#ecf0f1';
+    colonSpan.style.color = 'var(--pre-text)';
     ruleLine.appendChild(colonSpan);
 
     // RHS
@@ -3409,13 +3416,15 @@ function createRulesTerminalView(rules) {
         if (sym.display_name && sym.display_name !== sym.symbol) {
           symSpan.title = sym.symbol;
         }
-        symSpan.style.color = sym.type === 'terminal' ? '#2ecc71' : '#e74c3c';
+        symSpan.style.color = sym.type === 'terminal'
+          ? 'var(--accent-terminal-text)'
+          : 'var(--accent-error-strong)';
         ruleLine.appendChild(symSpan);
       });
     } else {
       const emptySpan = document.createElement('span');
       emptySpan.textContent = rule.explicit_empty ? '%empty' : '/* empty */';
-      emptySpan.style.color = '#95a5a6';
+      emptySpan.style.color = 'var(--btn-secondary)';
       emptySpan.style.fontStyle = 'italic';
       ruleLine.appendChild(emptySpan);
     }
@@ -3424,7 +3433,7 @@ function createRulesTerminalView(rules) {
       const actionSpan = document.createElement('span');
       actionSpan.textContent = ' { ... }';
       actionSpan.title = rule.action.preview || 'Action code';
-      actionSpan.style.color = '#f1c40f';
+      actionSpan.style.color = 'var(--accent-warning-strong)';
       ruleLine.appendChild(actionSpan);
     }
 
@@ -3432,7 +3441,7 @@ function createRulesTerminalView(rules) {
     if (rule.line_number) {
       const lineSpan = document.createElement('span');
       lineSpan.textContent = ` /* line ${rule.line_number} */`;
-      lineSpan.style.color = '#7f8c8d';
+      lineSpan.style.color = 'var(--text-secondary)';
       lineSpan.style.fontSize = '11px';
       lineSpan.style.marginLeft = '10px';
       ruleLine.appendChild(lineSpan);
