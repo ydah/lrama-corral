@@ -1,4 +1,5 @@
 import { lramaBridge } from './lib/lrama-bridge.js';
+import './styles.css';
 import { readStorage, writeStorage } from './lib/safe-storage.js';
 import {
   countSymbolReferences,
