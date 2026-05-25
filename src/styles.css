@@ -823,6 +823,7 @@ select {
     transition-duration: 0.01ms !important;
   }
 
+  .rule-card:hover,
   .add-rule-btn:hover {
     transform: none;
   }
