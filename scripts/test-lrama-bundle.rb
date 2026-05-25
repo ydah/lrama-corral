@@ -49,6 +49,7 @@ begin
   # Parse the grammar
   parser = Lrama::Parser.new(test_grammar, "test.y")
   grammar = parser.parse
+  grammar.prepare
 
   puts "SUCCESS: Grammar parsed successfully!"
   puts ""
@@ -60,23 +61,49 @@ begin
 
   # Test basic properties
   puts "Testing grammar properties..."
+  failures = []
 
   if grammar.nterms.any? { |t| t.display_name == 'expr' }
     puts "  ✓ Found nonterminal 'expr'"
   else
     puts "  ✗ Nonterminal 'expr' not found"
+    failures << "Nonterminal 'expr' not found"
   end
 
   if grammar.terms.any? { |t| t.display_name == 'NUMBER' }
     puts "  ✓ Found terminal 'NUMBER'"
   else
     puts "  ✗ Terminal 'NUMBER' not found"
+    failures << "Terminal 'NUMBER' not found"
   end
 
   if grammar.rules.count > 0
     puts "  ✓ Rules extracted: #{grammar.rules.count} rules"
   else
     puts "  ✗ No rules found"
+    failures << "No rules found"
+  end
+
+  sample_paths = Dir[File.expand_path('../public/samples/*.y', __dir__)].sort
+  sample_paths.each do |path|
+    source = File.read(path)
+    parser = Lrama::Parser.new(source, File.basename(path))
+    sample_grammar = parser.parse
+    sample_grammar.prepare
+
+    if sample_grammar.rules.any?
+      puts "  ✓ Sample parsed: #{File.basename(path)} (#{sample_grammar.rules.count} rules)"
+    else
+      puts "  ✗ Sample has no rules: #{File.basename(path)}"
+      failures << "Sample has no rules: #{File.basename(path)}"
+    end
+  end
+
+  unless failures.empty?
+    puts ""
+    puts "=== Test Failures ==="
+    failures.each { |failure| puts "  - #{failure}" }
+    exit 1
   end
 
   puts ""

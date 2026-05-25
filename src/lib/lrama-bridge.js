@@ -8,13 +8,25 @@ class LramaBridge {
     this.vm = null;
     this.ready = false;
     this.initPromise = null;
+    this.progress = null;
+  }
+
+  _notify(message) {
+    console.log(message);
+    if (this.progress) {
+      this.progress(message);
+    }
   }
 
   /**
    * Initialize Ruby Wasm VM
    * @returns {Promise<void>}
    */
-  async init() {
+  async init(progress = null) {
+    if (progress) {
+      this.progress = progress;
+    }
+
     if (this.ready) {
       return;
     }
@@ -25,44 +37,40 @@ class LramaBridge {
 
     this.initPromise = (async () => {
       try {
-        console.log('Initializing Ruby Wasm VM...');
+        this._notify('Initializing Ruby Wasm VM...');
 
         // Initialize Ruby VM
         // Use document.baseURI to resolve paths correctly for GitHub Pages
         const baseUrl = new URL('./', document.baseURI).href;
+        this._notify('Downloading ruby.wasm...');
         const response = await fetch(new URL('ruby.wasm', baseUrl));
         const buffer = await response.arrayBuffer();
+        this._notify('Compiling ruby.wasm...');
         const module = await WebAssembly.compile(buffer);
 
         // DefaultRubyVM is a function, not a constructor
         const { vm } = await DefaultRubyVM(module);
         this.vm = vm;
 
-        console.log('Loading Lrama bundle...');
+        this._notify('Loading Lrama bundle...');
 
         // Load lrama_bundle.rb (all Lrama code)
-        // Add timestamp for cache busting
-        const bundleResponse = await fetch(new URL(`lrama_bundle.rb?v=${Date.now()}`, baseUrl), {
-          cache: 'no-store'
-        });
+        const cacheMode = import.meta.env.DEV ? 'no-store' : 'default';
+        const bundleResponse = await fetch(new URL('lrama_bundle.rb', baseUrl), { cache: cacheMode });
         const bundleCode = await bundleResponse.text();
         this.vm.eval(bundleCode);
 
-        console.log('Loading Railroad Diagrams bundle...');
+        this._notify('Loading Railroad Diagrams bundle...');
 
         // Load railroad_diagrams_bundle.rb
-        const railroadBundleResponse = await fetch(new URL(`railroad_diagrams_bundle.rb?v=${Date.now()}`, baseUrl), {
-          cache: 'no-store'
-        });
+        const railroadBundleResponse = await fetch(new URL('railroad_diagrams_bundle.rb', baseUrl), { cache: cacheMode });
         const railroadBundleCode = await railroadBundleResponse.text();
         this.vm.eval(railroadBundleCode);
 
-        console.log('Loading Lrama API...');
+        this._notify('Loading Lrama API...');
 
         // Load lrama_api.rb
-        const apiResponse = await fetch(new URL(`lrama_api.rb?v=${Date.now()}`, baseUrl), {
-          cache: 'no-store'
-        });
+        const apiResponse = await fetch(new URL('lrama_api.rb', baseUrl), { cache: cacheMode });
         const apiCode = await apiResponse.text();
 
         // Comment out require statements for lrama_bundle.rb and railroad_diagrams_bundle.rb
@@ -79,7 +87,7 @@ class LramaBridge {
         this.vm.eval(modifiedApiCode);
 
         this.ready = true;
-        console.log('Ruby Wasm VM initialized successfully');
+        this._notify('Ruby Wasm VM initialized successfully');
       } catch (error) {
         console.error('Failed to initialize Ruby Wasm VM:', error);
         throw error;
@@ -99,6 +107,20 @@ class LramaBridge {
     }
   }
 
+  _encodeSource(source) {
+    const bytes = new TextEncoder().encode(source);
+    return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+  }
+
+  _call(methodName, source) {
+    const sourceHex = this._encodeSource(source);
+    const result = this.vm.eval(`
+      LramaAPI.call('${methodName}', ['${sourceHex}'].pack('H*').force_encoding('UTF-8'))
+    `);
+
+    return JSON.parse(result.toString());
+  }
+
   /**
    * Parse .y file content
    * @param {string} source - .y file content
@@ -108,11 +130,7 @@ class LramaBridge {
     this._ensureReady();
 
     try {
-      const result = this.vm.eval(`
-        LramaAPI.call('parse', ${JSON.stringify(source)})
-      `);
-
-      return JSON.parse(result.toString());
+      return this._call('parse', source);
     } catch (error) {
       console.error('Parse error:', error);
       return {
@@ -135,11 +153,7 @@ class LramaBridge {
     this._ensureReady();
 
     try {
-      const result = this.vm.eval(`
-        LramaAPI.call('validate', ${JSON.stringify(source)})
-      `);
-
-      return JSON.parse(result.toString());
+      return this._call('validate', source);
     } catch (error) {
       console.error('Validation error:', error);
       return {

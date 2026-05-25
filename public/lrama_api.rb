@@ -28,11 +28,19 @@ module SimpleJSON
   end
 
   def self.escape_string(str)
-    str.gsub('\\', '\\\\\\\\')
-       .gsub('"', '\\"')
-       .gsub("\n", '\\n')
-       .gsub("\r", '\\r')
-       .gsub("\t", '\\t')
+    replacements = {
+      "\\" => "\\\\",
+      '"' => '\"',
+      "\b" => '\b',
+      "\f" => '\f',
+      "\n" => '\n',
+      "\r" => '\r',
+      "\t" => '\t'
+    }
+
+    str.gsub(/[\\\"\x00-\x1f]/) do |char|
+      replacements.fetch(char) { "\\u%04x" % char.ord }
+    end
   end
 end
 
@@ -50,7 +58,7 @@ module LramaAPI
         # Extract grammar information
         result = {
           success: true,
-          grammar: extract_grammar_info(grammar)
+          grammar: extract_grammar_info(grammar, source)
         }
 
         SimpleJSON.generate(result)
@@ -126,34 +134,28 @@ module LramaAPI
     private
 
     # Extract necessary information from Grammar object
-    def extract_grammar_info(grammar)
+    def extract_grammar_info(grammar, source = nil)
       # Calculate First/Follow sets and conflicts
       first_sets = {}
       follow_sets = {}
       conflicts = []
       state_transitions = []
+      nullable_symbols = []
+      lint = {}
+      analysis_warnings = []
+      expectations = {}
 
       begin
         # Prepare Grammar (calculate First sets, etc.)
         # This process correctly registers nterms
         grammar.prepare
-        grammar.compute_nullable
-        grammar.compute_first_set
 
         # Extract after grammar.prepare
         tokens = extract_tokens(grammar)
         nonterminals = extract_nonterminals(grammar)
         rules = extract_rules(grammar)
-
-        # The start symbol is the LHS of the first user rule
-        # (the accept symbol's first RHS element, or first non-augmented rule)
-        start_sym = if grammar.rules.any?
-          # Find the first rule that's not the $accept rule
-          first_user_rule = grammar.rules.find { |r| r.lhs.id.s_value != "$accept" }
-          first_user_rule&.lhs&.id&.s_value
-        else
-          nil
-        end
+        start_sym = extract_start_symbol(grammar, source)
+        nullable_symbols = extract_nullable_symbols(grammar)
 
         # Extract First sets (nonterminals only)
         grammar.nterms.each do |nterm|
@@ -166,6 +168,7 @@ module LramaAPI
         # Build States (LALR state machine)
         states = Lrama::States.new(grammar, trace_state: false)
         states.compute
+        expectations = extract_expectations(grammar, states)
 
         # Extract Follow sets
         states.follow_sets.each do |(state_id, nterm_token_id), terms|
@@ -211,19 +214,27 @@ module LramaAPI
           state_data = extract_state_transitions(state, grammar)
           state_transitions << state_data if state_data
         end
+
+        lint = analyze_grammar_lint(tokens, nonterminals, rules, start_sym)
       rescue => e
+        analysis_warnings << {
+          phase: 'analysis',
+          message: e.message
+        }
+
         # Return basic information only if error occurs in First/Follow calculation
-        grammar.prepare if !grammar.respond_to?(:nterms) || grammar.nterms.nil?
+        begin
+          grammar.prepare if !grammar.respond_to?(:nterms) || grammar.nterms.nil?
+        rescue => prepare_error
+          analysis_warnings << {
+            phase: 'prepare',
+            message: prepare_error.message
+          }
+        end
         tokens = extract_tokens(grammar)
         nonterminals = extract_nonterminals(grammar)
         rules = extract_rules(grammar)
-
-        start_sym = if grammar.rules.any?
-          first_user_rule = grammar.rules.find { |r| r.lhs.id.s_value != "$accept" }
-          first_user_rule&.lhs&.id&.s_value
-        else
-          nil
-        end
+        start_sym = extract_start_symbol(grammar, source)
       end
 
       # Generate syntax diagrams for each nonterminal
@@ -231,7 +242,10 @@ module LramaAPI
       begin
         syntax_diagrams = generate_syntax_diagrams(grammar)
       rescue => e
-        # If diagram generation fails, log the error
+        analysis_warnings << {
+          phase: 'syntax_diagrams',
+          message: e.message
+        }
         syntax_diagrams = { "_error" => "Failed to generate diagrams: #{e.message}" }
       end
 
@@ -240,12 +254,173 @@ module LramaAPI
         nonterminals: nonterminals,
         rules: rules,
         start_symbol: start_sym,
+        metadata: extract_metadata,
+        nullable_symbols: nullable_symbols,
         first_sets: first_sets,
         follow_sets: follow_sets,
         conflicts: conflicts,
+        expectations: expectations,
+        lint: lint,
+        analysis_warnings: analysis_warnings,
         syntax_diagrams: syntax_diagrams,
         state_transitions: state_transitions
       }
+    end
+
+    def extract_metadata
+      {
+        lrama_version: defined?(Lrama::VERSION) ? Lrama::VERSION : nil,
+        capabilities: [
+          'parse',
+          'validate',
+          'first_sets',
+          'follow_sets',
+          'nullable_symbols',
+          'conflicts',
+          'state_transitions',
+          'syntax_diagrams',
+          'grammar_lint'
+        ]
+      }
+    end
+
+    def extract_start_symbol(grammar, source)
+      directive_start = extract_start_directive(source)
+      return directive_start if directive_start
+
+      return nil unless grammar.rules.any?
+
+      first_user_rule = grammar.rules.find { |r| r.lhs.id.s_value != "$accept" }
+      first_user_rule&.lhs&.id&.s_value
+    end
+
+    def extract_start_directive(source)
+      return nil unless source
+
+      source.each_line do |line|
+        next unless line =~ /^\s*%start\s+([A-Za-z_][A-Za-z0-9_]*)/
+
+        return Regexp.last_match(1)
+      end
+
+      nil
+    end
+
+    def extract_nullable_symbols(grammar)
+      return [] unless grammar.nterms
+
+      grammar.nterms
+        .select { |nterm| nterm.nullable && !nterm.id.s_value.start_with?('$') }
+        .map { |nterm| nterm.id.s_value }
+        .sort
+    end
+
+    def extract_expectations(grammar, states)
+      expected_sr = grammar.respond_to?(:expect) ? grammar.expect : nil
+      actual_sr = states.respond_to?(:sr_conflicts_count) ? states.sr_conflicts_count : nil
+      actual_rr = states.respond_to?(:rr_conflicts_count) ? states.rr_conflicts_count : nil
+
+      {
+        shift_reduce: {
+          expected: expected_sr,
+          actual: actual_sr,
+          satisfied: expected_sr.nil? ? nil : expected_sr == actual_sr
+        },
+        reduce_reduce: {
+          expected: 0,
+          actual: actual_rr,
+          satisfied: actual_rr.nil? ? nil : actual_rr == 0
+        }
+      }
+    end
+
+    def analyze_grammar_lint(tokens, nonterminals, rules, start_sym)
+      token_names = tokens.map { |token| token[:name] }.reject { |name| name.start_with?('$') }
+      declared_nonterminals = nonterminals.map { |nterm| nterm[:name] }.to_set
+      lhs_names = rules.map { |rule| rule[:lhs] }.reject { |name| name.start_with?('$') }.to_set
+      rhs_symbols = rules.flat_map { |rule| rule[:rhs].map { |sym| sym[:symbol] } }.reject { |name| name.start_with?('$') }
+      rhs_token_names = rules.flat_map { |rule|
+        rule[:rhs].select { |sym| sym[:type] == 'terminal' }.map { |sym| sym[:symbol] }
+      }.reject { |name| name.start_with?('$') }.to_set
+      rhs_nonterm_names = rules.flat_map { |rule|
+        rule[:rhs].select { |sym| sym[:type] == 'nonterminal' }.map { |sym| sym[:symbol] }
+      }.reject { |name| name.start_with?('$') }.to_set
+
+      undefined_symbols = rhs_symbols
+        .reject { |name| token_names.include?(name) || lhs_names.include?(name) || name == 'error' }
+        .uniq
+        .sort
+
+      unused_tokens = (token_names - rhs_token_names.to_a - ['error']).sort
+      reachable_nonterminals = compute_reachable_nonterminals(rules, start_sym)
+      unreachable_nonterminals = (lhs_names.to_a - reachable_nonterminals.to_a).sort
+      unused_rules = rules
+        .select { |rule| !rule[:lhs].start_with?('$') && !reachable_nonterminals.include?(rule[:lhs]) }
+        .map { |rule| rule[:id] }
+      non_productive_nonterminals = compute_non_productive_nonterminals(rules, token_names.to_set)
+
+      {
+        undefined_symbols: undefined_symbols,
+        unused_tokens: unused_tokens,
+        unreachable_nonterminals: unreachable_nonterminals,
+        unused_rules: unused_rules,
+        non_productive_nonterminals: non_productive_nonterminals.sort,
+        referenced_nonterminals_without_rules: (rhs_nonterm_names - lhs_names).to_a.sort,
+        declared_nonterminals_without_rules: (declared_nonterminals - lhs_names).to_a.sort
+      }
+    end
+
+    def compute_reachable_nonterminals(rules, start_sym)
+      reachable = Set.new
+      return reachable unless start_sym
+
+      rules_by_lhs = rules.group_by { |rule| rule[:lhs] }
+      queue = [start_sym]
+
+      until queue.empty?
+        lhs = queue.shift
+        next if reachable.include?(lhs)
+
+        reachable.add(lhs)
+        rules_by_lhs.fetch(lhs, []).each do |rule|
+          rule[:rhs].each do |symbol|
+            next unless symbol[:type] == 'nonterminal'
+            next if symbol[:symbol].start_with?('$')
+            next if reachable.include?(symbol[:symbol])
+
+            queue << symbol[:symbol]
+          end
+        end
+      end
+
+      reachable
+    end
+
+    def compute_non_productive_nonterminals(rules, token_names)
+      lhs_names = rules.map { |rule| rule[:lhs] }.reject { |name| name.start_with?('$') }.to_set
+      productive = Set.new
+
+      loop do
+        changed = false
+
+        rules.each do |rule|
+          lhs = rule[:lhs]
+          next if lhs.start_with?('$') || productive.include?(lhs)
+
+          derives_terminal_string = rule[:rhs].all? do |symbol|
+            symbol[:type] == 'terminal' || productive.include?(symbol[:symbol]) || token_names.include?(symbol[:symbol])
+          end
+
+          if derives_terminal_string
+            productive.add(lhs)
+            changed = true
+          end
+        end
+
+        break unless changed
+      end
+
+      (lhs_names - productive).to_a
     end
 
     def extract_tokens(grammar)
@@ -380,6 +555,7 @@ module LramaAPI
       shifts = []
       reduces = []
       gotos = []
+      conflicts = []
 
       # Extract Shift transitions
       state.shifts.each do |sym, next_state_id|
@@ -415,12 +591,33 @@ module LramaAPI
         }
       end if state.respond_to?(:items) && state.items
 
+      if state.respond_to?(:sr_conflicts) && state.sr_conflicts
+        state.sr_conflicts.each do |conflict|
+          conflicts << {
+            type: 'shift_reduce',
+            severity: 'warning',
+            tokens: conflict.symbols.map { |s| s.id.s_value }
+          }
+        end
+      end
+
+      if state.respond_to?(:rr_conflicts) && state.rr_conflicts
+        state.rr_conflicts.each do |conflict|
+          conflicts << {
+            type: 'reduce_reduce',
+            severity: 'error',
+            tokens: conflict.symbols.map { |s| s.id.s_value }
+          }
+        end
+      end
+
       {
         id: state.id,
         items: items,
         shifts: shifts,
         gotos: gotos,
-        reduces: reduces
+        reduces: reduces,
+        conflicts: conflicts
       }
     rescue => e
       # Return basic information only if error occurs
@@ -430,6 +627,7 @@ module LramaAPI
         shifts: [],
         gotos: [],
         reduces: [],
+        conflicts: [],
         error: e.message
       }
     end

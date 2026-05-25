@@ -1,5 +1,19 @@
 import { lramaBridge } from './lib/lrama-bridge.js';
+import { readStorage, writeStorage } from './lib/safe-storage.js';
+import {
+  findRuleEndLine,
+  removeSymbolFromDeclarationLine,
+  removeTypeDeclaration as removeTypeDeclarationFromLines,
+  upsertNonterminalDeclaration,
+  upsertTokenDeclaration,
+} from './lib/source-transforms.js';
+import { parseSanitizedSvg, sanitizeSvgElement } from './lib/svg-sanitizer.js';
 import * as monaco from 'monaco-editor';
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+
+self.MonacoEnvironment = {
+  getWorker: () => new EditorWorker(),
+};
 
 // DOM elements
 const statusEl = document.getElementById('status');
@@ -68,6 +82,18 @@ let pendingSymbolToAdd = null;
 
 // Latest parse result for export
 let latestParseResult = null;
+let latestParsedSource = '';
+let parseRequestId = 0;
+let validateRequestId = 0;
+
+// File and draft state
+const DEFAULT_DOWNLOAD_FILENAME = 'grammar.y';
+const DRAFT_STORAGE_KEY = 'lrama-corral:draft';
+const THEME_STORAGE_KEY = 'lrama-corral:theme';
+const MAX_GRAMMAR_FILE_SIZE = 1024 * 1024;
+let currentFileName = DEFAULT_DOWNLOAD_FILENAME;
+let isDirty = false;
+let draftSaveTimer = null;
 
 /**
  * Yacc/Bison language definition for Monaco Editor
@@ -99,6 +125,14 @@ function registerYaccLanguage() {
             '%start': 'keyword',
             '%union': 'keyword',
             '%prec': 'keyword',
+            '%empty': 'keyword',
+            '%code': 'keyword',
+            '%parse-param': 'keyword',
+            '%lex-param': 'keyword',
+            '%define': 'keyword',
+            '%printer': 'keyword',
+            '%destructor': 'keyword',
+            '%locations': 'keyword',
             '@default': 'directive'
           }
         }],
@@ -224,6 +258,12 @@ function registerYaccLanguage() {
         { label: '%prec', insertText: '%prec ', detail: 'Precedence specification' },
         { label: '%define', insertText: '%define ', detail: 'Bison definition' },
         { label: '%code', insertText: '%code {\n  $0\n}', detail: 'Code block', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+        { label: '%parse-param', insertText: '%parse-param { ${1:param} }', detail: 'Parser parameter', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+        { label: '%lex-param', insertText: '%lex-param { ${1:param} }', detail: 'Lexer parameter', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+        { label: '%locations', insertText: '%locations', detail: 'Enable locations' },
+        { label: '%printer', insertText: '%printer { ${1:code} } ${2:symbol}', detail: 'Printer code', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+        { label: '%destructor', insertText: '%destructor { ${1:code} } ${2:symbol}', detail: 'Destructor code', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet },
+        { label: '%empty', insertText: '%empty', detail: 'Explicit empty rule' },
         { label: '%error-verbose', insertText: '%error-verbose', detail: 'Verbose error' },
         { label: '%expect', insertText: '%expect ', detail: 'Expected conflict count' },
         { label: '%expect-rr', insertText: '%expect-rr ', detail: 'Expected reduce/reduce conflict count' },
@@ -277,8 +317,117 @@ function registerYaccLanguage() {
         });
       });
 
+      const grammar = latestParseResult?.grammar;
+      if (grammar) {
+        const symbols = [
+          ...(grammar.tokens || []).map(token => ({
+            label: token.name,
+            kind: monaco.languages.CompletionItemKind.EnumMember,
+            detail: token.type ? `Token ${token.type}` : 'Token',
+          })),
+          ...(grammar.nonterminals || []).map(nonterminal => ({
+            label: nonterminal.name,
+            kind: monaco.languages.CompletionItemKind.Class,
+            detail: nonterminal.type ? `Nonterminal ${nonterminal.type}` : 'Nonterminal',
+          })),
+        ];
+
+        symbols.forEach(symbol => {
+          suggestions.push({
+            label: symbol.label,
+            kind: symbol.kind,
+            insertText: symbol.label,
+            detail: symbol.detail,
+            documentation: symbol.detail,
+          });
+        });
+      }
+
       return { suggestions };
     }
+  });
+
+  monaco.languages.registerHoverProvider('yacc', {
+    provideHover: (model, position) => {
+      const word = model.getWordAtPosition(position);
+      const symbol = word?.word;
+      const grammar = latestParseResult?.grammar;
+      if (!symbol || !grammar) return null;
+
+      const token = grammar.tokens?.find(item => item.name === symbol);
+      if (token) {
+        return {
+          range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+          contents: [
+            { value: `**Token** \`${token.name}\`` },
+            { value: `Type: \`${token.type || '-'}\`, ID: \`${token.token_id ?? '-'}\`` },
+          ],
+        };
+      }
+
+      const nonterminal = grammar.nonterminals?.find(item => item.name === symbol);
+      if (!nonterminal) return null;
+
+      const first = grammar.first_sets?.[symbol]?.join(', ') || '-';
+      const follow = grammar.follow_sets?.[symbol]?.join(', ') || '-';
+      return {
+        range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+        contents: [
+          { value: `**Nonterminal** \`${nonterminal.name}\`` },
+          { value: `Type: \`${nonterminal.type || '-'}\`` },
+          { value: `FIRST: \`${first}\`` },
+          { value: `FOLLOW: \`${follow}\`` },
+        ],
+      };
+    },
+  });
+
+  monaco.languages.registerDefinitionProvider('yacc', {
+    provideDefinition: (model, position) => {
+      const word = model.getWordAtPosition(position);
+      const symbol = word?.word;
+      const grammar = latestParseResult?.grammar;
+      if (!symbol || !grammar?.rules) return null;
+
+      const rule = grammar.rules.find(item => item.lhs === symbol && item.line_number);
+      if (!rule) return null;
+
+      return {
+        uri: model.uri,
+        range: new monaco.Range(rule.line_number, 1, rule.line_number, model.getLineMaxColumn(rule.line_number)),
+      };
+    },
+  });
+
+  monaco.languages.registerFoldingRangeProvider('yacc', {
+    provideFoldingRanges: (model) => {
+      const ranges = [];
+      const lines = model.getLinesContent();
+
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (line.includes('%{')) {
+          const end = lines.findIndex((candidate, candidateIndex) => (
+            candidateIndex > index && candidate.includes('%}')
+          ));
+          if (end !== -1) {
+            ranges.push({ start: index + 1, end: end + 1, kind: monaco.languages.FoldingRangeKind.Region });
+            index = end;
+          }
+          continue;
+        }
+
+        if (/^\s*[A-Za-z_][A-Za-z0-9_]*\s*:/.test(line)) {
+          const end = findRuleEndLine(lines, index);
+          if (end > index) {
+            ranges.push({ start: index + 1, end: end + 1, kind: monaco.languages.FoldingRangeKind.Region });
+            index = end;
+          }
+        }
+      }
+
+      return ranges;
+    },
   });
 }
 
@@ -308,8 +457,15 @@ factor: NUMBER
       | LPAREN expr RPAREN
       ;`;
 
+  const draft = loadDraft();
+  const initialValue = draft?.content || defaultValue;
+  if (draft?.fileName) {
+    currentFileName = draft.fileName;
+    isDirty = true;
+  }
+
   editor = monaco.editor.create(editorContainer, {
-    value: defaultValue,
+    value: initialValue,
     language: 'yacc',
     theme: isDarkMode ? 'yacc-theme-dark' : 'yacc-theme',
     automaticLayout: true,
@@ -327,6 +483,9 @@ factor: NUMBER
   // Update Undo/Redo button state when editor content changes
   editor.onDidChangeModelContent(() => {
     updateUndoRedoButtons();
+    invalidateParseResult();
+    scheduleDraftSave();
+    isDirty = true;
   });
 
   // Update initial button state
@@ -355,15 +514,15 @@ function toggleTheme() {
     monaco.editor.setTheme(isDarkMode ? 'yacc-theme-dark' : 'yacc-theme');
   }
 
-  // Save to localStorage
-  localStorage.setItem('theme', isDarkMode ? 'dark' : 'light');
+  // Save theme preference when storage is available.
+  writeStorage(THEME_STORAGE_KEY, isDarkMode ? 'dark' : 'light');
 }
 
 /**
  * Load saved theme settings
  */
 function loadTheme() {
-  const savedTheme = localStorage.getItem('theme');
+  const savedTheme = readStorage(THEME_STORAGE_KEY);
   if (savedTheme === 'dark') {
     isDarkMode = true;
     document.documentElement.setAttribute('data-theme', 'dark');
@@ -409,6 +568,199 @@ function updateUndoRedoButtons() {
   redoBtn.disabled = !canRedo;
 }
 
+function loadDraft() {
+  const stored = readStorage(DRAFT_STORAGE_KEY);
+  if (!stored) return null;
+
+  try {
+    const draft = JSON.parse(stored);
+    if (!draft || typeof draft.content !== 'string') return null;
+    return draft;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function scheduleDraftSave() {
+  if (!editor) return;
+  window.clearTimeout(draftSaveTimer);
+  draftSaveTimer = window.setTimeout(() => {
+    const content = editor.getValue();
+    writeStorage(DRAFT_STORAGE_KEY, JSON.stringify({
+      content,
+      fileName: currentFileName,
+      updatedAt: new Date().toISOString(),
+    }));
+  }, 300);
+}
+
+function replaceEditorContent(content, source = 'lrama-corral') {
+  if (!editor) return;
+
+  const model = editor.getModel();
+  if (!model) return;
+
+  editor.executeEdits(source, [{
+    range: model.getFullModelRange(),
+    text: content,
+    forceMoveMarkers: true,
+  }]);
+  editor.pushUndoStop();
+}
+
+function replaceEditorLineRange(startLineNumber, endLineNumber, text, source = 'lrama-corral') {
+  if (!editor) return;
+
+  const model = editor.getModel();
+  if (!model) return;
+
+  const range = new monaco.Range(
+    startLineNumber,
+    1,
+    endLineNumber,
+    model.getLineMaxColumn(endLineNumber)
+  );
+
+  editor.executeEdits(source, [{
+    range,
+    text,
+    forceMoveMarkers: true,
+  }]);
+  editor.pushUndoStop();
+}
+
+function insertEditorText(lineNumber, column, text, source = 'lrama-corral') {
+  if (!editor) return;
+
+  const range = new monaco.Range(lineNumber, column, lineNumber, column);
+  editor.executeEdits(source, [{
+    range,
+    text,
+    forceMoveMarkers: true,
+  }]);
+  editor.pushUndoStop();
+}
+
+function invalidateParseResult() {
+  if (!latestParseResult) return;
+
+  latestParseResult = null;
+  latestParsedSource = '';
+  exportBtn.disabled = true;
+  setParseMarkers([]);
+  updateStatus('Grammar changed - run Parse again before exporting', 'loading');
+}
+
+function markContentClean() {
+  isDirty = false;
+}
+
+function confirmDiscardDirtyContent() {
+  if (!isDirty) return true;
+  return confirm('Current edits will be replaced. Continue?');
+}
+
+function sanitizeDownloadFileName(fileName) {
+  const sanitized = fileName.trim().replace(/[\\/:*?"<>|]+/g, '-');
+  return sanitized || DEFAULT_DOWNLOAD_FILENAME;
+}
+
+function validateGrammarFile(file) {
+  if (!file.name.match(/\.(y|yacc|yy)$/i)) {
+    return 'Unsupported file format. Please use .y, .yacc, or .yy files.';
+  }
+
+  if (file.size > MAX_GRAMMAR_FILE_SIZE) {
+    return `File is too large. The limit is ${Math.round(MAX_GRAMMAR_FILE_SIZE / 1024)} KB.`;
+  }
+
+  const type = file.type.toLowerCase();
+  const textLike = !type || type.startsWith('text/') || type === 'application/octet-stream';
+  if (!textLike) {
+    return 'Unsupported file type. Please use a text grammar file.';
+  }
+
+  return null;
+}
+
+function setParseMarkers(errors = []) {
+  if (!editor) return;
+
+  const model = editor.getModel();
+  if (!model) return;
+
+  const markers = errors.map(error => {
+    const line = Math.max(1, error.location?.line || 1);
+    const column = Math.max(1, error.location?.column || 1);
+    return {
+      startLineNumber: line,
+      startColumn: column,
+      endLineNumber: line,
+      endColumn: column + 1,
+      message: error.message || 'Parse error',
+      severity: error.severity === 'warning'
+        ? monaco.MarkerSeverity.Warning
+        : monaco.MarkerSeverity.Error,
+    };
+  });
+
+  monaco.editor.setModelMarkers(model, 'lrama-corral', markers);
+}
+
+function getActiveModal() {
+  const activeModals = [symbolModal, symbolTypeModal, ruleModal]
+    .filter(modal => modal.classList.contains('active'));
+  return activeModals.at(-1) || null;
+}
+
+function showModal(modal, focusTarget) {
+  modal.classList.add('active');
+  modal.setAttribute('aria-hidden', 'false');
+  window.setTimeout(() => focusTarget?.focus(), 0);
+}
+
+function hideModal(modal) {
+  modal.classList.remove('active');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function closeTopModal() {
+  const activeModal = getActiveModal();
+  if (!activeModal) return false;
+
+  if (activeModal === symbolModal) {
+    closeSymbolModal(true);
+  } else if (activeModal === symbolTypeModal) {
+    closeSymbolTypeModal(true);
+  } else if (activeModal === ruleModal) {
+    closeRuleModal();
+  }
+
+  return true;
+}
+
+function trapModalFocus(event, modal) {
+  const focusableElements = [...modal.querySelectorAll(
+    'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+  )].filter(element => !element.disabled && element.offsetParent !== null);
+
+  if (focusableElements.length === 0) {
+    event.preventDefault();
+    return;
+  }
+
+  const first = focusableElements[0];
+  const last = focusableElements[focusableElements.length - 1];
+
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 /**
  * Open symbol modal
  */
@@ -437,15 +789,14 @@ function openSymbolModal(type, index = null, symbolData = {}) {
     tokenId.value = '';
   }
 
-  symbolModal.classList.add('active');
-  symbolName.focus();
+  showModal(symbolModal, symbolName);
 }
 
 /**
  * Close symbol modal
  */
 function closeSymbolModal(clearPending = false) {
-  symbolModal.classList.remove('active');
+  hideModal(symbolModal);
   symbolForm.reset();
   editingSymbolType = null;
   editingSymbolIndex = null;
@@ -482,6 +833,10 @@ function handleSaveSymbol(event) {
   // Get type information (optional)
   const typeValue = symbolType.value.trim();
   const tokenIdValue = tokenId.value.trim();
+  if (tokenIdValue && !/^\d+$/.test(tokenIdValue)) {
+    alert('Token ID must be a positive integer');
+    return;
+  }
 
   if (editingSymbolType === 'token') {
     // Add/edit token
@@ -491,7 +846,7 @@ function handleSaveSymbol(event) {
     updateNonterminalDeclaration(lines, name, typeValue);
   }
 
-  model.setValue(lines.join('\n'));
+  replaceEditorContent(lines.join('\n'));
   editor.focus();
   closeSymbolModal();
 
@@ -517,49 +872,7 @@ function handleSaveSymbol(event) {
  */
 function updateTokenDeclaration(lines, name, type, tokenIdValue) {
   const oldName = editingSymbolOriginalName;
-
-  // Find existing %token line
-  let tokenLineIndex = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().startsWith('%token')) {
-      if (oldName && lines[i].includes(oldName)) {
-        tokenLineIndex = i;
-        break;
-      }
-    }
-  }
-
-  if (editingSymbolIndex !== null && oldName) {
-    // Edit mode: replace existing token
-    if (tokenLineIndex !== -1) {
-      // Remove old name from that line
-      lines[tokenLineIndex] = lines[tokenLineIndex].replace(new RegExp(`\\b${oldName}\\b`), name);
-    }
-  } else {
-    // New addition mode
-    // Find last %token line
-    let lastTokenLine = -1;
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].trim().startsWith('%token')) {
-        lastTokenLine = i;
-      }
-    }
-
-    if (lastTokenLine !== -1) {
-      // Add to existing %token line
-      lines[lastTokenLine] += ` ${name}`;
-    } else {
-      // Add new %token line (before %%)
-      let insertIndex = lines.findIndex(line => line.trim() === '%%');
-      if (insertIndex === -1) insertIndex = 0;
-      lines.splice(insertIndex, 0, `%token ${name}`);
-    }
-  }
-
-  // Add/update %type declaration if type information is present
-  if (type) {
-    updateTypeDeclaration(lines, name, type, oldName);
-  }
+  upsertTokenDeclaration(lines, name, type, tokenIdValue, oldName);
 }
 
 /**
@@ -567,62 +880,14 @@ function updateTokenDeclaration(lines, name, type, tokenIdValue) {
  */
 function updateNonterminalDeclaration(lines, name, type) {
   const oldName = editingSymbolOriginalName;
-
-  // Update %type declaration only if type information is present
-  if (type) {
-    updateTypeDeclaration(lines, name, type, oldName);
-  } else if (oldName && type === '') {
-    // Remove from %type declaration if type information is deleted
-    removeTypeDeclaration(lines, oldName);
-  }
-}
-
-/**
- * Update %type declaration
- */
-function updateTypeDeclaration(lines, name, type, oldName) {
-  // Find existing %type <type> line
-  let typeLineIndex = -1;
-  const typePattern = type.startsWith('<') ? type : `<${type}>`;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().startsWith('%type') && lines[i].includes(typePattern)) {
-      typeLineIndex = i;
-      break;
-    }
-  }
-
-  if (oldName && typeLineIndex !== -1) {
-    // Replace old name with new name
-    lines[typeLineIndex] = lines[typeLineIndex].replace(new RegExp(`\\b${oldName}\\b`), name);
-  } else {
-    // New addition or different type
-    if (typeLineIndex !== -1) {
-      // Add to existing line
-      lines[typeLineIndex] += ` ${name}`;
-    } else {
-      // Add new %type line (before %%)
-      let insertIndex = lines.findIndex(line => line.trim() === '%%');
-      if (insertIndex === -1) insertIndex = 0;
-      lines.splice(insertIndex, 0, `%type ${typePattern} ${name}`);
-    }
-  }
+  upsertNonterminalDeclaration(lines, name, type, oldName);
 }
 
 /**
  * Remove from %type declaration
  */
 function removeTypeDeclaration(lines, name) {
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().startsWith('%type') && lines[i].includes(name)) {
-      lines[i] = lines[i].replace(new RegExp(`\\s+${name}\\b`), '');
-      // Delete if line becomes empty
-      if (lines[i].trim() === '%type') {
-        lines.splice(i, 1);
-      }
-      break;
-    }
-  }
+  removeTypeDeclarationFromLines(lines, name);
 }
 
 /**
@@ -645,7 +910,7 @@ function handleDeleteSymbol(type, symbolData) {
     // Remove from token declaration
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].trim().startsWith('%token') && lines[i].includes(name)) {
-        lines[i] = lines[i].replace(new RegExp(`\\s+${name}\\b`), '');
+        lines[i] = removeSymbolFromDeclarationLine(lines[i], name);
         // Delete if line becomes empty
         if (lines[i].trim() === '%token') {
           lines.splice(i, 1);
@@ -658,7 +923,7 @@ function handleDeleteSymbol(type, symbolData) {
   // Also remove from %type declaration
   removeTypeDeclaration(lines, name);
 
-  model.setValue(lines.join('\n'));
+  replaceEditorContent(lines.join('\n'));
   editor.focus();
 
   // Re-parse to update parse results
@@ -678,14 +943,14 @@ function openRuleModal(lineNumber = null, lhs = '', rhs = []) {
   ruleLHS.value = lhs;
   currentRuleSymbols = rhs.map(s => s.symbol || s);
   updateRHSDisplay();
-  ruleModal.classList.add('active');
+  showModal(ruleModal, ruleLHS);
 }
 
 /**
  * Close modal
  */
 function closeRuleModal() {
-  ruleModal.classList.remove('active');
+  hideModal(ruleModal);
   ruleForm.reset();
   currentRuleSymbols = [];
   editingLineNumber = null;
@@ -717,6 +982,7 @@ function updateRHSDisplay() {
 
     const removeBtn = document.createElement('button');
     removeBtn.textContent = '×';
+    removeBtn.setAttribute('aria-label', `Remove ${symbol}`);
     removeBtn.addEventListener('click', () => {
       currentRuleSymbols.splice(index, 1);
       updateRHSDisplay();
@@ -780,14 +1046,14 @@ function isSymbolDefined(symbolName) {
  */
 function openSymbolTypeModal(symbol) {
   symbolTypeSymbolName.textContent = symbol;
-  symbolTypeModal.classList.add('active');
+  showModal(symbolTypeModal, registerAsTokenBtn);
 }
 
 /**
  * Close symbol type selection modal
  */
 function closeSymbolTypeModal(clearPending = true) {
-  symbolTypeModal.classList.remove('active');
+  hideModal(symbolTypeModal);
   // Clear pending symbol if cancelled
   if (clearPending && pendingSymbolToAdd) {
     pendingSymbolToAdd = null;
@@ -843,18 +1109,15 @@ function handleSaveRule(event) {
 
     if (editingLineNumber) {
       // Edit existing rule
-      // Find and replace the line
       const lines = currentContent.split('\n');
       let ruleStart = editingLineNumber - 1;
-      let ruleEnd = ruleStart;
+      let ruleEnd = findRuleEndLine(lines, ruleStart);
 
-      // Find the end of the rule (;)
-      while (ruleEnd < lines.length && !lines[ruleEnd].includes(';')) {
-        ruleEnd++;
-      }
-
-      lines.splice(ruleStart, ruleEnd - ruleStart + 1, ...ruleText.trim().split('\n'));
-      model.setValue(lines.join('\n'));
+      replaceEditorLineRange(
+        ruleStart + 1,
+        ruleEnd + 1,
+        ruleText.trim()
+      );
     } else {
       // Add new rule
       // Add after %%
@@ -864,15 +1127,18 @@ function handleSaveRule(event) {
       if (insertIndex !== -1) {
         // If there is an empty line after %%, insert after it
         insertIndex += 2;
-        lines.splice(insertIndex, 0, '', ...ruleText.split('\n'));
-        model.setValue(lines.join('\n'));
+        insertEditorText(
+          insertIndex + 1,
+          1,
+          `\n${ruleText}\n`
+        );
 
         // Move cursor to newly added line
         editor.setPosition({ lineNumber: insertIndex + 2, column: 1 });
         editor.revealLineInCenter(insertIndex + 2);
       } else {
         // Add to end if %% not found
-        model.setValue(currentContent + '\n\n%%\n\n' + ruleText);
+        replaceEditorContent(`${currentContent}\n\n%%\n\n${ruleText}`);
       }
     }
 
@@ -893,6 +1159,21 @@ function handleSaveRule(event) {
  * Keyboard shortcut handler
  */
 function handleKeyboardShortcuts(event) {
+  const activeModal = getActiveModal();
+  if (activeModal) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeTopModal();
+      return;
+    }
+
+    if (event.key === 'Tab') {
+      trapModalFocus(event, activeModal);
+    }
+
+    return;
+  }
+
   const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   const modKey = isMac ? event.metaKey : event.ctrlKey;
 
@@ -1014,8 +1295,20 @@ function showStructuredResult(data) {
   if (grammar.start_symbol) {
     const startEl = document.createElement('div');
     startEl.style.marginBottom = '20px';
-    startEl.innerHTML = `<strong>Start Symbol:</strong> <code style="background: #ecf0f1; padding: 2px 6px; border-radius: 3px;">${grammar.start_symbol}</code>`;
+    const label = document.createElement('strong');
+    label.textContent = 'Start Symbol:';
+    const code = document.createElement('code');
+    code.textContent = grammar.start_symbol;
+    code.style.background = 'var(--status-bg)';
+    code.style.padding = '2px 6px';
+    code.style.borderRadius = '3px';
+    code.style.marginLeft = '4px';
+    startEl.append(label, code);
     outputEl.appendChild(startEl);
+  }
+
+  if (grammar.metadata || (grammar.analysis_warnings && grammar.analysis_warnings.length > 0)) {
+    outputEl.appendChild(createMetadataSection(grammar.metadata, grammar.analysis_warnings || []));
   }
 
   // Token list (with edit/delete buttons)
@@ -1055,6 +1348,18 @@ function showStructuredResult(data) {
     outputEl.appendChild(conflictsSection);
   }
 
+  if (grammar.expectations) {
+    outputEl.appendChild(createExpectationsSection(grammar.expectations));
+  }
+
+  if (grammar.nullable_symbols && grammar.nullable_symbols.length > 0) {
+    outputEl.appendChild(createNullableSection(grammar.nullable_symbols));
+  }
+
+  if (grammar.lint && hasLintFindings(grammar.lint)) {
+    outputEl.appendChild(createLintSection(grammar.lint));
+  }
+
   // Display First/Follow sets
   if (grammar.first_sets && grammar.follow_sets) {
     const firstFollowSection = createFirstFollowSection(grammar.first_sets, grammar.follow_sets);
@@ -1080,6 +1385,171 @@ function showStructuredResult(data) {
     const rulesSection = createRulesSection(grammar.rules);
     outputEl.appendChild(rulesSection);
   }
+}
+
+function createMetadataSection(metadata, warnings) {
+  const section = document.createElement('div');
+  section.style.marginBottom = '25px';
+
+  const titleEl = document.createElement('h4');
+  titleEl.textContent = 'Parser Runtime';
+  titleEl.style.color = 'var(--text-primary)';
+  titleEl.style.marginBottom = '10px';
+  titleEl.style.fontSize = '16px';
+  section.appendChild(titleEl);
+
+  if (metadata?.lrama_version) {
+    const version = document.createElement('p');
+    version.textContent = `Lrama ${metadata.lrama_version}`;
+    version.style.color = 'var(--text-secondary)';
+    version.style.fontSize = '13px';
+    section.appendChild(version);
+  }
+
+  if (warnings.length > 0) {
+    const list = document.createElement('ul');
+    list.style.marginTop = '10px';
+    list.style.paddingLeft = '18px';
+    warnings.forEach(warning => {
+      const item = document.createElement('li');
+      item.textContent = `${warning.phase}: ${warning.message}`;
+      item.style.color = 'var(--status-loading-text)';
+      item.style.fontSize = '13px';
+      list.appendChild(item);
+    });
+    section.appendChild(list);
+  }
+
+  return section;
+}
+
+function createExpectationsSection(expectations) {
+  const section = document.createElement('div');
+  section.style.marginBottom = '25px';
+
+  const titleEl = document.createElement('h4');
+  titleEl.textContent = 'Conflict Expectations';
+  titleEl.style.color = 'var(--text-primary)';
+  titleEl.style.marginBottom = '10px';
+  titleEl.style.fontSize = '16px';
+  section.appendChild(titleEl);
+
+  const rows = [
+    ['Shift/Reduce', expectations.shift_reduce],
+    ['Reduce/Reduce', expectations.reduce_reduce],
+  ];
+
+  rows.forEach(([label, data]) => {
+    if (!data) return;
+    const row = document.createElement('div');
+    row.style.fontSize = '13px';
+    row.style.color = 'var(--text-secondary)';
+    row.style.marginBottom = '4px';
+    const status = data.satisfied === null
+      ? 'not declared'
+      : data.satisfied ? 'satisfied' : 'mismatch';
+    row.textContent = `${label}: actual ${data.actual}, expected ${data.expected ?? 'none'} (${status})`;
+    section.appendChild(row);
+  });
+
+  return section;
+}
+
+function createNullableSection(nullableSymbols) {
+  const section = document.createElement('div');
+  section.style.marginBottom = '25px';
+
+  const titleEl = document.createElement('h4');
+  titleEl.textContent = `Nullable Nonterminals (${nullableSymbols.length})`;
+  titleEl.style.color = 'var(--text-primary)';
+  titleEl.style.marginBottom = '10px';
+  titleEl.style.fontSize = '16px';
+  section.appendChild(titleEl);
+
+  const container = document.createElement('div');
+  container.style.display = 'flex';
+  container.style.gap = '6px';
+  container.style.flexWrap = 'wrap';
+
+  nullableSymbols.forEach(symbol => {
+    const tag = document.createElement('span');
+    tag.textContent = symbol;
+    tag.style.padding = '3px 8px';
+    tag.style.borderRadius = '3px';
+    tag.style.fontSize = '12px';
+    tag.style.fontFamily = "'Courier New', monospace";
+    tag.style.background = 'rgba(155, 89, 182, 0.15)';
+    tag.style.color = '#8e44ad';
+    tag.style.border = '1px solid rgba(155, 89, 182, 0.3)';
+    container.appendChild(tag);
+  });
+
+  section.appendChild(container);
+  return section;
+}
+
+function hasLintFindings(lint) {
+  return Object.values(lint).some(value => Array.isArray(value) && value.length > 0);
+}
+
+function createLintSection(lint) {
+  const labels = {
+    undefined_symbols: 'Undefined Symbols',
+    unused_tokens: 'Unused Tokens',
+    unreachable_nonterminals: 'Unreachable Nonterminals',
+    unused_rules: 'Unused Rules',
+    non_productive_nonterminals: 'Nonproductive Nonterminals',
+    referenced_nonterminals_without_rules: 'Referenced Nonterminals Without Rules',
+    declared_nonterminals_without_rules: 'Declared Nonterminals Without Rules',
+  };
+
+  const section = document.createElement('div');
+  section.style.marginBottom = '25px';
+
+  const titleEl = document.createElement('h4');
+  titleEl.textContent = 'Grammar Lint';
+  titleEl.style.color = 'var(--text-primary)';
+  titleEl.style.marginBottom = '10px';
+  titleEl.style.fontSize = '16px';
+  section.appendChild(titleEl);
+
+  Object.entries(labels).forEach(([key, label]) => {
+    const values = lint[key] || [];
+    if (values.length === 0) return;
+
+    const group = document.createElement('div');
+    group.style.marginBottom = '10px';
+
+    const groupTitle = document.createElement('div');
+    groupTitle.textContent = `${label}:`;
+    groupTitle.style.fontWeight = '600';
+    groupTitle.style.fontSize = '13px';
+    groupTitle.style.marginBottom = '4px';
+    group.appendChild(groupTitle);
+
+    const valuesEl = document.createElement('div');
+    valuesEl.style.display = 'flex';
+    valuesEl.style.flexWrap = 'wrap';
+    valuesEl.style.gap = '6px';
+
+    values.forEach(value => {
+      const tag = document.createElement('span');
+      tag.textContent = String(value);
+      tag.style.padding = '3px 8px';
+      tag.style.borderRadius = '3px';
+      tag.style.fontSize = '12px';
+      tag.style.fontFamily = "'Courier New', monospace";
+      tag.style.background = 'rgba(243, 156, 18, 0.15)';
+      tag.style.color = '#b36b00';
+      tag.style.border = '1px solid rgba(243, 156, 18, 0.3)';
+      valuesEl.appendChild(tag);
+    });
+
+    group.appendChild(valuesEl);
+    section.appendChild(group);
+  });
+
+  return section;
 }
 
 /**
@@ -1535,6 +2005,7 @@ function createSymbolSection(title, items, headers, symbolType, originalData) {
     // Edit button
     const editBtn = document.createElement('button');
     editBtn.textContent = '✏️ Edit';
+    editBtn.setAttribute('aria-label', `Edit ${item.name}`);
     editBtn.className = 'secondary';
     editBtn.style.padding = '4px 8px';
     editBtn.style.fontSize = '11px';
@@ -1546,6 +2017,7 @@ function createSymbolSection(title, items, headers, symbolType, originalData) {
     // Delete button
     const deleteBtn = document.createElement('button');
     deleteBtn.textContent = '🗑️ Delete';
+    deleteBtn.setAttribute('aria-label', `Delete ${item.name}`);
     deleteBtn.className = 'secondary';
     deleteBtn.style.padding = '4px 8px';
     deleteBtn.style.fontSize = '11px';
@@ -1577,7 +2049,18 @@ function createRulesCardView(rules) {
 
     // Click to jump to editor
     if (rule.line_number) {
+      card.tabIndex = 0;
+      card.setAttribute('role', 'button');
       card.addEventListener('click', () => {
+        if (editor) {
+          editor.revealLineInCenter(rule.line_number);
+          editor.setPosition({ lineNumber: rule.line_number, column: 1 });
+          editor.focus();
+        }
+      });
+      card.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
         if (editor) {
           editor.revealLineInCenter(rule.line_number);
           editor.setPosition({ lineNumber: rule.line_number, column: 1 });
@@ -1802,7 +2285,7 @@ function createStateTransitionGraph(stateTransitions) {
     const pos = positions[state.id];
     if (!pos) return;
 
-    const hasConflict = state.error || (state.reduces && state.reduces.length > 0);
+    const hasConflict = state.error || (state.conflicts && state.conflicts.length > 0);
     drawStateNode(svg, pos, state.id, hasConflict, nodeRadius);
   });
 
@@ -1862,7 +2345,9 @@ function calculateStatePositions(stateTransitions, width, height, nodeRadius) {
   Object.keys(levelGroups).forEach(level => {
     const states = levelGroups[level];
     const levelNum = parseInt(level);
-    const x = margin + (levelNum / maxLevel) * usableWidth;
+    const x = maxLevel === 0
+      ? width / 2
+      : margin + (levelNum / maxLevel) * usableWidth;
 
     states.forEach((stateId, index) => {
       const y = margin + ((index + 0.5) / states.length) * usableHeight;
@@ -1955,14 +2440,17 @@ function createStateDetailsTable(stateTransitions) {
   titleEl.style.fontSize = '14px';
   section.appendChild(titleEl);
 
-  // Collapsible state list
-  stateTransitions.slice(0, 10).forEach(state => {
-    const stateCard = document.createElement('details');
-    stateCard.style.marginBottom = '10px';
-    stateCard.style.background = 'var(--bg-secondary)';
-    stateCard.style.border = '1px solid var(--border-color)';
-    stateCard.style.borderRadius = '4px';
-    stateCard.style.padding = '10px';
+  const list = document.createElement('div');
+  section.appendChild(list);
+
+  const renderStateCards = (states) => {
+    states.forEach(state => {
+      const stateCard = document.createElement('details');
+      stateCard.style.marginBottom = '10px';
+      stateCard.style.background = 'var(--bg-secondary)';
+      stateCard.style.border = '1px solid var(--border-color)';
+      stateCard.style.borderRadius = '4px';
+      stateCard.style.padding = '10px';
 
     const summary = document.createElement('summary');
     summary.textContent = `State ${state.id}`;
@@ -1978,7 +2466,10 @@ function createStateDetailsTable(stateTransitions) {
     // Items
     if (state.items && state.items.length > 0) {
       const itemsDiv = document.createElement('div');
-      itemsDiv.innerHTML = `<strong>Items:</strong><br/>`;
+      const label = document.createElement('strong');
+      label.textContent = 'Items:';
+      itemsDiv.appendChild(label);
+      itemsDiv.appendChild(document.createElement('br'));
       state.items.forEach(item => {
         const itemLine = document.createElement('div');
         itemLine.textContent = `  ${item.display}`;
@@ -1994,8 +2485,11 @@ function createStateDetailsTable(stateTransitions) {
     if (state.shifts && state.shifts.length > 0) {
       const shiftsDiv = document.createElement('div');
       shiftsDiv.style.marginTop = '8px';
-      shiftsDiv.innerHTML = `<strong>Shifts:</strong> `;
-      shiftsDiv.innerHTML += state.shifts.map(s => `${s.symbol} → ${s.to_state}`).join(', ');
+      const label = document.createElement('strong');
+      label.textContent = 'Shifts: ';
+      const text = document.createElement('span');
+      text.textContent = state.shifts.map(s => `${s.symbol} → ${s.to_state}`).join(', ');
+      shiftsDiv.append(label, text);
       content.appendChild(shiftsDiv);
     }
 
@@ -2003,8 +2497,11 @@ function createStateDetailsTable(stateTransitions) {
     if (state.gotos && state.gotos.length > 0) {
       const gotosDiv = document.createElement('div');
       gotosDiv.style.marginTop = '8px';
-      gotosDiv.innerHTML = `<strong>Gotos:</strong> `;
-      gotosDiv.innerHTML += state.gotos.map(g => `${g.symbol} → ${g.to_state}`).join(', ');
+      const label = document.createElement('strong');
+      label.textContent = 'Gotos: ';
+      const text = document.createElement('span');
+      text.textContent = state.gotos.map(g => `${g.symbol} → ${g.to_state}`).join(', ');
+      gotosDiv.append(label, text);
       content.appendChild(gotosDiv);
     }
 
@@ -2012,23 +2509,45 @@ function createStateDetailsTable(stateTransitions) {
     if (state.reduces && state.reduces.length > 0) {
       const reducesDiv = document.createElement('div');
       reducesDiv.style.marginTop = '8px';
-      reducesDiv.innerHTML = `<strong>Reduces:</strong> `;
-      reducesDiv.innerHTML += state.reduces.map(r => `${r.symbol} → Rule #${r.rule_id}`).join(', ');
+      const label = document.createElement('strong');
+      label.textContent = 'Reduces: ';
+      const text = document.createElement('span');
+      text.textContent = state.reduces.map(r => `${r.symbol} → Rule #${r.rule_id}`).join(', ');
+      reducesDiv.append(label, text);
       content.appendChild(reducesDiv);
     }
 
+    if (state.conflicts && state.conflicts.length > 0) {
+      const conflictsDiv = document.createElement('div');
+      conflictsDiv.style.marginTop = '8px';
+      const label = document.createElement('strong');
+      label.textContent = 'Conflicts: ';
+      const text = document.createElement('span');
+      text.textContent = state.conflicts
+        .map(conflict => `${conflict.type.replace(/_/g, '/')} (${conflict.tokens.join(', ')})`)
+        .join(', ');
+      conflictsDiv.append(label, text);
+      content.appendChild(conflictsDiv);
+    }
+
     stateCard.appendChild(content);
-    section.appendChild(stateCard);
-  });
+      list.appendChild(stateCard);
+    });
+  };
+
+  // Collapsible state list
+  renderStateCards(stateTransitions.slice(0, 10));
 
   if (stateTransitions.length > 10) {
-    const moreInfo = document.createElement('p');
-    moreInfo.textContent = `... and ${stateTransitions.length - 10} more states`;
-    moreInfo.style.color = 'var(--text-secondary)';
-    moreInfo.style.fontSize = '13px';
-    moreInfo.style.fontStyle = 'italic';
-    moreInfo.style.marginTop = '10px';
-    section.appendChild(moreInfo);
+    const showAllBtn = document.createElement('button');
+    showAllBtn.className = 'secondary';
+    showAllBtn.textContent = `Show ${stateTransitions.length - 10} more states`;
+    showAllBtn.style.marginTop = '10px';
+    showAllBtn.addEventListener('click', () => {
+      renderStateCards(stateTransitions.slice(10));
+      showAllBtn.remove();
+    });
+    section.appendChild(showAllBtn);
   }
 
   return section;
@@ -2121,14 +2640,12 @@ function createSyntaxDiagramsSection(syntaxDiagrams) {
     svgContainer.style.justifyContent = 'center';
     svgContainer.style.alignItems = 'center';
 
-    // Insert SVG as HTML
-    svgContainer.innerHTML = syntaxDiagrams[symbol];
-
-    // Adjust SVG element style
-    const svg = svgContainer.querySelector('svg');
+    // Insert a sanitized SVG diagram.
+    const svg = parseSanitizedSvg(syntaxDiagrams[symbol]);
     if (svg) {
       svg.style.maxWidth = '100%';
       svg.style.height = 'auto';
+      svgContainer.appendChild(svg);
 
       // SVG export button event listener
       svgExportBtn.addEventListener('click', () => {
@@ -2143,6 +2660,13 @@ function createSyntaxDiagramsSection(syntaxDiagrams) {
         downloadPNG(svg, filename);
         updateStatus(`PNG export started: ${filename}`, 'ready');
       });
+    } else {
+      svgExportBtn.disabled = true;
+      pngExportBtn.disabled = true;
+      const error = document.createElement('span');
+      error.textContent = 'Diagram could not be rendered safely.';
+      error.style.color = 'var(--status-error-text)';
+      svgContainer.appendChild(error);
     }
 
     diagramCard.appendChild(svgContainer);
@@ -2331,12 +2855,21 @@ function createRulesTerminalView(rules) {
   return rulesContainer;
 }
 
+async function ensureLramaReady() {
+  if (lramaBridge.isReady()) return;
+
+  await lramaBridge.init((message) => {
+    updateStatus(message, 'loading');
+  });
+}
+
 /**
  * Parse button handler
  */
 async function handleParse() {
   clearOutput();
   const source = editor.getValue().trim();
+  const requestId = ++parseRequestId;
 
   if (!source) {
     showError('Input is empty. Please enter .y file content.');
@@ -2346,9 +2879,11 @@ async function handleParse() {
   try {
     parseBtn.disabled = true;
     validateBtn.disabled = true;
+    await ensureLramaReady();
     updateStatus('Parsing...', 'loading');
 
     const result = await lramaBridge.parse(source);
+    if (requestId !== parseRequestId) return;
 
     if (result.success) {
       updateStatus('Parse successful', 'ready');
@@ -2357,9 +2892,12 @@ async function handleParse() {
       addRuleBtn.style.display = 'block';
       // Save parse result and enable export button
       latestParseResult = result;
+      latestParsedSource = source;
       exportBtn.disabled = false;
+      setParseMarkers([]);
     } else {
       updateStatus('Parse error', 'error');
+      setParseMarkers(result.errors || []);
 
       // Display error information
       if (result.errors && result.errors.length > 0) {
@@ -2393,15 +2931,22 @@ async function handlePresetSelect(event) {
     return;
   }
 
+  if (!confirmDiscardDirtyContent()) {
+    event.target.value = '';
+    return;
+  }
+
   try {
-    const response = await fetch(`/samples/${preset}.y`);
+    const response = await fetch(`${import.meta.env.BASE_URL}samples/${preset}.y`);
 
     if (!response.ok) {
       throw new Error(`Failed to load sample: ${response.statusText}`);
     }
 
     const content = await response.text();
-    editor.setValue(content);
+    replaceEditorContent(content);
+    currentFileName = `${preset}.y`;
+    markContentClean();
     clearOutput();
     updateStatus('Sample loaded', 'ready');
 
@@ -2420,6 +2965,7 @@ async function handlePresetSelect(event) {
 async function handleValidate() {
   clearOutput();
   const source = editor.getValue().trim();
+  const requestId = ++validateRequestId;
 
   if (!source) {
     showError('Input is empty. Please enter .y file content.');
@@ -2429,15 +2975,19 @@ async function handleValidate() {
   try {
     parseBtn.disabled = true;
     validateBtn.disabled = true;
+    await ensureLramaReady();
     updateStatus('Validating...', 'loading');
 
     const result = await lramaBridge.validate(source);
+    if (requestId !== validateRequestId) return;
 
     if (result.valid) {
       updateStatus('Validation successful - Grammar is correct', 'ready');
+      setParseMarkers([]);
       showResult('Validation Result', result);
     } else {
       updateStatus('Validation failed - Grammar has errors', 'error');
+      setParseMarkers(result.errors || []);
 
       // Display error information
       if (result.errors && result.errors.length > 0) {
@@ -2470,6 +3020,13 @@ function handleExport() {
 
   const grammar = latestParseResult.grammar;
   const source = editor.getValue();
+  if (source.trim() !== latestParsedSource) {
+    alert('The grammar changed after the last successful parse. Please run Parse again before exporting.');
+    latestParseResult = null;
+    latestParsedSource = '';
+    exportBtn.disabled = true;
+    return;
+  }
 
   // Generate HTML report
   const html = generateHTMLReport(source, grammar);
@@ -2497,6 +3054,10 @@ function handleExport() {
  */
 function generateHTMLReport(source, grammar) {
   const now = new Date().toLocaleString();
+  const renderToken = (value, className) => {
+    const safeClassName = className === 'nonterminal' ? 'nonterminal' : 'terminal';
+    return `<span class="token ${safeClassName}">${escapeHtml(String(value))}</span>`;
+  };
 
   let html = `<!DOCTYPE html>
 <html lang="ja">
@@ -2530,21 +3091,21 @@ function generateHTMLReport(source, grammar) {
   <div class="container">
     <header>
       <h1>Lrama Grammar Report</h1>
-      <p class="subtitle">Generated: ${now}</p>
+      <p class="subtitle">Generated: ${escapeHtml(now)}</p>
     </header>
     <div class="content">
 `;
 
   // Start symbol
   if (grammar.start_symbol) {
-    html += `<h2>Start Symbol</h2><p><code>${grammar.start_symbol}</code></p>`;
+    html += `<h2>Start Symbol</h2><p><code>${escapeHtml(grammar.start_symbol)}</code></p>`;
   }
 
   // Tokens
   if (grammar.tokens && grammar.tokens.length > 0) {
     html += `<h2>Tokens (${grammar.tokens.length})</h2><table><thead><tr><th>Name</th><th>Type</th><th>ID</th></tr></thead><tbody>`;
     grammar.tokens.forEach(t => {
-      html += `<tr><td>${t.name}</td><td>${t.type || '-'}</td><td>${t.token_id !== null ? t.token_id : '-'}</td></tr>`;
+      html += `<tr><td>${escapeHtml(t.name)}</td><td>${escapeHtml(t.type || '-')}</td><td>${escapeHtml(String(t.token_id !== null ? t.token_id : '-'))}</td></tr>`;
     });
     html += `</tbody></table>`;
   }
@@ -2553,7 +3114,7 @@ function generateHTMLReport(source, grammar) {
   if (grammar.nonterminals && grammar.nonterminals.length > 0) {
     html += `<h2>Nonterminals (${grammar.nonterminals.length})</h2><table><thead><tr><th>Name</th><th>Type</th></tr></thead><tbody>`;
     grammar.nonterminals.forEach(n => {
-      html += `<tr><td>${n.name}</td><td>${n.type || '-'}</td></tr>`;
+      html += `<tr><td>${escapeHtml(n.name)}</td><td>${escapeHtml(n.type || '-')}</td></tr>`;
     });
     html += `</tbody></table>`;
   }
@@ -2564,11 +3125,24 @@ function generateHTMLReport(source, grammar) {
     grammar.conflicts.forEach(c => {
       html += `<div class="conflict">
         <span class="conflict-tag">${c.severity === 'error' ? 'ERROR' : 'WARNING'}</span>
-        <span class="conflict-tag" style="background: #95a5a6;">${c.type.replace(/_/g, ' ').toUpperCase()}</span>
-        <p style="margin-top: 10px;">${c.message}</p>
-        ${c.rules ? `<p style="margin-top: 8px;"><strong>Rules:</strong> ${c.rules.join(', ')}</p>` : ''}
-        ${c.tokens ? `<p><strong>Tokens:</strong> ${c.tokens.join(', ')}</p>` : ''}
+        <span class="conflict-tag" style="background: #95a5a6;">${escapeHtml(c.type.replace(/_/g, ' ').toUpperCase())}</span>
+        <p style="margin-top: 10px;">${escapeHtml(c.message)}</p>
+        ${c.rules ? `<p style="margin-top: 8px;"><strong>Rules:</strong> ${escapeHtml(c.rules.join(', '))}</p>` : ''}
+        ${c.tokens ? `<p><strong>Tokens:</strong> ${escapeHtml(c.tokens.join(', '))}</p>` : ''}
       </div>`;
+    });
+  }
+
+  if (grammar.nullable_symbols && grammar.nullable_symbols.length > 0) {
+    html += `<h2>Nullable Nonterminals (${grammar.nullable_symbols.length})</h2>`;
+    html += grammar.nullable_symbols.map(sym => renderToken(sym, 'nonterminal')).join(' ');
+  }
+
+  if (grammar.lint && hasLintFindings(grammar.lint)) {
+    html += `<h2>Grammar Lint</h2>`;
+    Object.entries(grammar.lint).forEach(([key, values]) => {
+      if (!Array.isArray(values) || values.length === 0) return;
+      html += `<h3>${escapeHtml(key.replace(/_/g, ' '))}</h3><p>${values.map(value => renderToken(value, 'terminal')).join(' ')}</p>`;
     });
   }
 
@@ -2577,11 +3151,11 @@ function generateHTMLReport(source, grammar) {
     html += `<h2>First/Follow Sets</h2>`;
     const symbols = Object.keys(grammar.first_sets).sort();
     symbols.forEach(sym => {
-      html += `<h3>${sym}</h3>`;
+      html += `<h3>${escapeHtml(sym)}</h3>`;
       html += `<p><strong>FIRST:</strong> `;
       const first = grammar.first_sets[sym] || [];
       if (first.length > 0) {
-        html += first.map(t => `<span class="token terminal">${t}</span>`).join(' ');
+        html += first.map(t => renderToken(t, 'terminal')).join(' ');
       } else {
         html += `<em>(empty)</em>`;
       }
@@ -2590,7 +3164,7 @@ function generateHTMLReport(source, grammar) {
       html += `<p><strong>FOLLOW:</strong> `;
       const follow = grammar.follow_sets[sym] || [];
       if (follow.length > 0) {
-        html += follow.map(t => `<span class="token nonterminal">${t}</span>`).join(' ');
+        html += follow.map(t => renderToken(t, 'nonterminal')).join(' ');
       } else {
         html += `<em>(empty)</em>`;
       }
@@ -2603,19 +3177,19 @@ function generateHTMLReport(source, grammar) {
     html += `<h2>Rules (${grammar.rules.length})</h2>`;
     grammar.rules.forEach(rule => {
       html += `<div style="margin: 10px 0; font-family: 'Courier New', monospace;">`;
-      html += `<span style="color: #95a5a6;">[${rule.id}]</span> `;
-      html += `<strong style="color: #3498db;">${rule.lhs}</strong> : `;
+      html += `<span style="color: #95a5a6;">[${escapeHtml(String(rule.id))}]</span> `;
+      html += `<strong style="color: #3498db;">${escapeHtml(rule.lhs)}</strong> : `;
 
       if (rule.rhs && rule.rhs.length > 0) {
         rule.rhs.forEach(sym => {
-          html += `<span class="token ${sym.type}">${sym.symbol}</span> `;
+          html += `${renderToken(sym.symbol, sym.type)} `;
         });
       } else {
         html += `<em>ε (empty)</em>`;
       }
 
       if (rule.line_number) {
-        html += `<span style="color: #7f8c8d; font-size: 11px;"> /* line ${rule.line_number} */</span>`;
+        html += `<span style="color: #7f8c8d; font-size: 11px;"> /* line ${escapeHtml(String(rule.line_number))} */</span>`;
       }
       html += `</div>`;
     });
@@ -2644,7 +3218,7 @@ function escapeHtml(text) {
     '"': '&quot;',
     "'": '&#039;'
   };
-  return text.replace(/[&<>"']/g, m => map[m]);
+  return String(text).replace(/[&<>"']/g, m => map[m]);
 }
 
 /**
@@ -2653,6 +3227,7 @@ function escapeHtml(text) {
 function downloadSVG(svgElement, filename) {
   // Create SVG element clone
   const svgClone = svgElement.cloneNode(true);
+  sanitizeSvgElement(svgClone);
   const svgString = new XMLSerializer().serializeToString(svgClone);
 
   const blob = new Blob([svgString], { type: 'image/svg+xml' });
@@ -2672,6 +3247,7 @@ function downloadSVG(svgElement, filename) {
  */
 function downloadPNG(svgElement, filename) {
   const svgClone = svgElement.cloneNode(true);
+  sanitizeSvgElement(svgClone);
   const svgString = new XMLSerializer().serializeToString(svgClone);
 
   // Get SVG size
@@ -2691,10 +3267,15 @@ function downloadPNG(svgElement, filename) {
   // Load SVG as Image
   const img = new Image();
   img.onload = function() {
+    URL.revokeObjectURL(svgUrl);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
     // Download as PNG
     canvas.toBlob(function(blob) {
+      if (!blob) {
+        updateStatus('PNG export failed', 'error');
+        return;
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -2704,6 +3285,10 @@ function downloadPNG(svgElement, filename) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }, 'image/png');
+  };
+  img.onerror = function() {
+    URL.revokeObjectURL(svgUrl);
+    updateStatus('PNG export failed', 'error');
   };
 
   // Set SVG as Data URL
@@ -2730,7 +3315,7 @@ function handleDownload() {
   // Create download link
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'grammar.y';
+  a.download = currentFileName || DEFAULT_DOWNLOAD_FILENAME;
   document.body.appendChild(a);
   a.click();
 
@@ -2739,6 +3324,7 @@ function handleDownload() {
   URL.revokeObjectURL(url);
 
   updateStatus('File downloaded', 'ready');
+  markContentClean();
 }
 
 /**
@@ -2755,9 +3341,23 @@ async function handleFileSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
 
+  if (!confirmDiscardDirtyContent()) {
+    fileInput.value = '';
+    return;
+  }
+
+  const validationError = validateGrammarFile(file);
+  if (validationError) {
+    showError(validationError);
+    fileInput.value = '';
+    return;
+  }
+
   try {
     const content = await file.text();
-    editor.setValue(content);
+    replaceEditorContent(content);
+    currentFileName = sanitizeDownloadFileName(file.name);
+    markContentClean();
     clearOutput();
     updateStatus(`File "${file.name}" loaded`, 'ready');
 
@@ -2795,15 +3395,21 @@ async function handleDrop(event) {
 
   const file = files[0];
 
-  // Accept only .y, .yacc, .yy files
-  if (!file.name.match(/\.(y|yacc|yy)$/i)) {
-    showError('Unsupported file format. Please drop .y, .yacc, or .yy files.');
+  if (!confirmDiscardDirtyContent()) {
+    return;
+  }
+
+  const validationError = validateGrammarFile(file);
+  if (validationError) {
+    showError(validationError);
     return;
   }
 
   try {
     const content = await file.text();
-    editor.setValue(content);
+    replaceEditorContent(content);
+    currentFileName = sanitizeDownloadFileName(file.name);
+    markContentClean();
     clearOutput();
     updateStatus(`File "${file.name}" loaded`, 'ready');
   } catch (error) {
@@ -2821,15 +3427,12 @@ async function init() {
     // Load theme settings
     loadTheme();
 
-    updateStatus('Initializing... Loading Monaco Editor and Ruby Wasm VM', 'loading');
+    updateStatus('Initializing editor...', 'loading');
 
     // Initialize Monaco Editor
     initMonacoEditor();
 
-    // Initialize Ruby Wasm + Lrama
-    await lramaBridge.init();
-
-    updateStatus('Ready - Click Parse button', 'ready');
+    updateStatus(isDirty ? 'Draft restored - Click Parse button' : 'Ready - Click Parse button', 'ready');
 
     // Enable buttons
     parseBtn.disabled = false;
