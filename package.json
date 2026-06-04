@@ -16,12 +16,12 @@
     "build:wasm": "bash scripts/build-wasm.sh"
   },
   "dependencies": {
-    "@ruby/wasm-wasi": "^2.5.0",
-    "monaco-editor": "^0.45.0"
+    "@ruby/wasm-wasi": "^2.8.1",
+    "monaco-editor": "^0.55.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
-    "vite": "^8.0.14"
+    "vite": "^8.0.16"
   },
   "keywords": [
     "lrama",
