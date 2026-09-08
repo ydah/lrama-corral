@@ -38,7 +38,7 @@ import {
   upsertTokenDeclaration,
 } from './lib/source-transforms.js';
 import { parseSanitizedSvg } from './lib/svg-sanitizer.js';
-import * as monaco from 'monaco-editor';
+import * as monaco from 'monaco-editor/editor/editor.api';
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker';
 
 /** @typedef {import('./lib/grammar-types.js').GrammarResult} GrammarResult */
