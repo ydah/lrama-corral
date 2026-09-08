@@ -23,6 +23,9 @@
     "@playwright/test": "^1.63.0",
     "vite": "^8.2.2"
   },
+  "overrides": {
+    "dompurify": "3.4.15"
+  },
   "keywords": [
     "lrama",
     "parser",
