@@ -43,7 +43,7 @@ jobs:
       - name: Bundle size budget
         run: npm run size:check
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
         with:
           enablement: true
       - name: Upload artifact
